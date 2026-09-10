@@ -45,6 +45,7 @@ export interface JournalComment {
 }
 
 export type MoneyType = 'income' | 'expense'
+export type SplitMode = 'personal' | 'shared'
 
 export interface MoneyEntry {
   id: string
@@ -56,6 +57,17 @@ export interface MoneyEntry {
   createdAt: string
   updatedAt: string
   deleted?: boolean
+  paidById?: string
+  paidByName?: string
+  splitMode?: SplitMode // default treat missing as 'personal'
+  participantIds?: string[]
+  participantNames?: string[]
+}
+
+export interface RoomMember {
+  id: string
+  displayName: string
+  updatedAt: string
 }
 
 export interface AppSettings {
@@ -65,6 +77,7 @@ export interface AppSettings {
   whStart: string
   whEnd: string
   displayName: string
+  partnerName: string
   roomCode: string | null
   userId: string | null
   notificationPermissionAsked: boolean
@@ -77,4 +90,5 @@ export type SyncCollection =
   | 'journalEntries'
   | 'journalComments'
   | 'moneyEntries'
+  | 'roomMembers'
   | 'settings'

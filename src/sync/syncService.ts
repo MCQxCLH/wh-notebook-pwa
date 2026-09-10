@@ -13,6 +13,7 @@ import type {
   JournalComment,
   MoneyEntry,
   AppSettings,
+  RoomMember,
 } from '../db/types'
 import { ensureAnonymousAuth, getFirebase, isFirebaseConfigured } from './firebase'
 
@@ -78,6 +79,26 @@ export async function pushMoneyEntry(m: MoneyEntry) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
   await pushDoc(s.roomCode, 'moneyEntries', m.id, { ...m })
+}
+
+export async function pushRoomMember(m: RoomMember) {
+  const s = await ensureSettings()
+  if (!s.roomCode || !isFirebaseConfigured()) return
+  await pushDoc(s.roomCode, 'members', m.id, { ...m })
+}
+
+/** Upsert current user into local roomMembers and push to Firestore. */
+export async function upsertSelfRoomMember(): Promise<RoomMember | null> {
+  const s = await ensureSettings()
+  if (!s.userId) return null
+  const member: RoomMember = {
+    id: s.userId,
+    displayName: s.displayName || 'Traveler',
+    updatedAt: new Date().toISOString(),
+  }
+  await db.roomMembers.put(member)
+  await pushRoomMember(member)
+  return member
 }
 
 export async function pushSettingsPartial(partial: Partial<AppSettings>) {
@@ -163,6 +184,16 @@ export async function startSync(): Promise<void> {
           await mergeCollection((id) => db.moneyEntries.get(id), (item) => db.moneyEntries.put(item), data as unknown as MoneyEntry)
         },
       },
+      {
+        name: 'members',
+        apply: async (data) => {
+          await mergeCollection(
+            (id) => db.roomMembers.get(id),
+            (item) => db.roomMembers.put(item),
+            data as unknown as RoomMember,
+          )
+        },
+      },
     ]
 
     for (const col of cols) {
@@ -208,6 +239,8 @@ export async function startSync(): Promise<void> {
       { merge: true },
     )
 
+    await upsertSelfRoomMember()
+
     setStatus('synced')
   } catch {
     setStatus('error')
@@ -222,12 +255,13 @@ export function stopSync() {
 export async function pushAllLocal(): Promise<void> {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  const [todos, reminders, entries, comments, money] = await Promise.all([
+  const [todos, reminders, entries, comments, money, members] = await Promise.all([
     db.todos.toArray(),
     db.reminders.toArray(),
     db.journalEntries.toArray(),
     db.journalComments.toArray(),
     db.moneyEntries.toArray(),
+    db.roomMembers.toArray(),
   ])
   await Promise.all([
     ...todos.map((t) => pushTodo(t)),
@@ -235,6 +269,8 @@ export async function pushAllLocal(): Promise<void> {
     ...entries.map((e) => pushJournalEntry(e)),
     ...comments.map((c) => pushJournalComment(c)),
     ...money.map((m) => pushMoneyEntry(m)),
+    ...members.map((m) => pushRoomMember(m)),
     pushSettingsPartial(s),
   ])
+  await upsertSelfRoomMember()
 }

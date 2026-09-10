@@ -4,15 +4,26 @@ import { useTranslation } from 'react-i18next'
 import { db, ensureSettings } from '../db/database'
 import type { Lang } from '../db/types'
 import { isFirebaseConfigured } from '../sync/firebase'
-import { pushAllLocal, pushSettingsPartial, startSync, stopSync } from '../sync/syncService'
+import {
+  pushAllLocal,
+  pushSettingsPartial,
+  startSync,
+  stopSync,
+  upsertSelfRoomMember,
+} from '../sync/syncService'
 import { generateRoomCode, normalizeRoomCode } from '../utils/roomCode'
 import i18n from '../i18n'
+
+const PRESET_CURRENCIES = ['HKD', 'AUD'] as const
 
 export function SettingsPage() {
   const { t } = useTranslation()
   const settings = useLiveQuery(() => ensureSettings(), [])
   const [displayName, setDisplayName] = useState('')
+  const [partnerName, setPartnerName] = useState('')
   const [currency, setCurrency] = useState('HKD')
+  const [customCurrency, setCustomCurrency] = useState('')
+  const [useOtherCurrency, setUseOtherCurrency] = useState(false)
   const [whStart, setWhStart] = useState('')
   const [whEnd, setWhEnd] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -23,9 +34,19 @@ export function SettingsPage() {
   useEffect(() => {
     if (!settings) return
     setDisplayName(settings.displayName)
-    setCurrency(settings.currency)
+    setPartnerName(settings.partnerName ?? '')
     setWhStart(settings.whStart)
     setWhEnd(settings.whEnd)
+    const c = (settings.currency || 'HKD').toUpperCase()
+    if ((PRESET_CURRENCIES as readonly string[]).includes(c)) {
+      setCurrency(c)
+      setUseOtherCurrency(false)
+      setCustomCurrency('')
+    } else {
+      setUseOtherCurrency(true)
+      setCustomCurrency(settings.currency || '')
+      setCurrency(settings.currency || '')
+    }
   }, [settings])
 
   useEffect(() => {
@@ -35,19 +56,50 @@ export function SettingsPage() {
 
   const firebaseOk = isFirebaseConfigured()
 
-  async function saveGeneral() {
+  async function persistSettings(partial: {
+    displayName?: string
+    partnerName?: string
+    currency?: string
+    whStart?: string
+    whEnd?: string
+  }) {
     if (!settings) return
     const next = {
       ...settings,
-      displayName: displayName.trim() || 'Traveler',
-      currency: currency.trim() || 'HKD',
-      whStart,
-      whEnd,
+      displayName: (partial.displayName ?? displayName).trim() || 'Traveler',
+      partnerName: (partial.partnerName ?? partnerName).trim(),
+      currency: (partial.currency ?? currency).trim().toUpperCase() || 'HKD',
+      whStart: partial.whStart ?? whStart,
+      whEnd: partial.whEnd ?? whEnd,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
     await pushSettingsPartial(next)
+    if (settings.roomCode) {
+      await upsertSelfRoomMember()
+    }
+    return next
+  }
+
+  async function saveGeneral() {
+    const cur = useOtherCurrency
+      ? customCurrency.trim().toUpperCase() || 'HKD'
+      : currency
+    await persistSettings({ currency: cur })
+    setCurrency(cur)
     setMsg(t('settings.save'))
+  }
+
+  async function selectCurrency(code: string) {
+    setUseOtherCurrency(false)
+    setCurrency(code)
+    setCustomCurrency('')
+    await persistSettings({ currency: code })
+    setMsg(t('settings.savedCurrency', { code }))
+  }
+
+  async function selectOtherCurrency() {
+    setUseOtherCurrency(true)
   }
 
   async function setLanguage(lang: Lang) {
@@ -80,11 +132,14 @@ export function SettingsPage() {
     const code = generateRoomCode()
     const next = {
       ...settings,
+      displayName: displayName.trim() || settings.displayName,
+      partnerName: partnerName.trim(),
       roomCode: code,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
     await startSync()
+    await upsertSelfRoomMember()
     await pushAllLocal()
     setMsg(t('settings.created'))
   }
@@ -99,11 +154,14 @@ export function SettingsPage() {
     if (code.length < 4) return
     const next = {
       ...settings,
+      displayName: displayName.trim() || settings.displayName,
+      partnerName: partnerName.trim(),
       roomCode: code,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
     await startSync()
+    await upsertSelfRoomMember()
     await pushAllLocal()
     setMsg(t('settings.joined'))
   }
@@ -141,6 +199,10 @@ export function SettingsPage() {
 
   if (!settings) return <div className="card">{t('common.loading')}</div>
 
+  const activeCurrency = useOtherCurrency
+    ? customCurrency.trim().toUpperCase()
+    : currency
+
   return (
     <>
       <div className="card stack">
@@ -169,8 +231,46 @@ export function SettingsPage() {
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </div>
         <div className="field">
+          <label>{t('settings.partnerName')}</label>
+          <input
+            value={partnerName}
+            onChange={(e) => setPartnerName(e.target.value)}
+            placeholder={t('settings.partnerNamePlaceholder')}
+          />
+        </div>
+        <div className="field">
           <label>{t('settings.currency')}</label>
-          <input value={currency} onChange={(e) => setCurrency(e.target.value)} />
+          <div className="chip-row">
+            {PRESET_CURRENCIES.map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={`chip${!useOtherCurrency && currency === code ? ' active' : ''}`}
+                onClick={() => void selectCurrency(code)}
+              >
+                {code}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`chip${useOtherCurrency ? ' active' : ''}`}
+              onClick={() => void selectOtherCurrency()}
+            >
+              {t('settings.currencyOther')}
+            </button>
+          </div>
+          {useOtherCurrency ? (
+            <input
+              style={{ marginTop: 8 }}
+              value={customCurrency}
+              onChange={(e) => setCustomCurrency(e.target.value.toUpperCase())}
+              placeholder="JPY"
+              maxLength={6}
+            />
+          ) : null}
+          <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+            {t('settings.currencyHint', { code: activeCurrency || 'HKD' })}
+          </div>
         </div>
         <div className="field">
           <label>{t('settings.whPeriod')}</label>
