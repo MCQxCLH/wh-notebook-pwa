@@ -18,21 +18,29 @@ import {
   YAxis,
 } from 'recharts'
 import { db, ensureSettings } from '../db/database'
-import type { MoneyEntry, MoneyType, SplitMode } from '../db/types'
+import type { EntryCurrency, MoneyEntry, MoneyType, SplitMode } from '../db/types'
 import { uid } from '../utils/id'
 import {
   effectiveSplitMode,
+  entryCurrency,
+  filterByCurrency,
   groupExpense,
   groupIncome,
+  groupScopeTotals,
   netBalance,
   personalExpense,
   personalIncome,
   shareForUser,
+  sharesForEntry,
 } from '../utils/moneySplits'
+import { RoomMembersList } from '../components/RoomMembersList'
 import { pushMoneyEntry } from '../sync/syncService'
 
 const INCOME_CATS = ['salary', 'gift', 'other'] as const
 const EXPENSE_CATS = ['food', 'rent', 'transport', 'fun', 'shopping', 'other'] as const
+const CURRENCIES: EntryCurrency[] = ['HKD', 'AUD']
+
+type FormSplit = 'personal' | 'equal' | 'custom'
 
 export function MoneyPage() {
   const { t } = useTranslation()
@@ -55,10 +63,15 @@ export function MoneyPage() {
   const [category, setCategory] = useState<string>('food')
   const [note, setNote] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [splitMode, setSplitMode] = useState<SplitMode>('personal')
+  const [formCurrency, setFormCurrency] = useState<EntryCurrency>('HKD')
+  const [splitMode, setSplitMode] = useState<FormSplit>('personal')
   const [paidBy, setPaidBy] = useState<'me' | 'partner'>('me')
+  const [myShareInput, setMyShareInput] = useState('')
+  const [partnerShareInput, setPartnerShareInput] = useState('')
+  const [chartCurrency, setChartCurrency] = useState<EntryCurrency>('HKD')
 
-  const currency = settings?.currency || 'HKD'
+  const defaultCurrency: EntryCurrency =
+    (settings?.currency || 'HKD').toUpperCase() === 'AUD' ? 'AUD' : 'HKD'
   const meId = settings?.userId || ''
   const meName = settings?.displayName || 'Traveler'
   const partnerName = settings?.partnerName?.trim() || t('money.partner')
@@ -73,16 +86,28 @@ export function MoneyPage() {
   const partnerId = partnerMember?.id || null
   const partnerLabel = partnerMember?.displayName || partnerName
 
-  const totals = useMemo(() => {
-    const gIncome = groupIncome(list)
-    const gExpense = groupExpense(list)
-    const pIncome = meId ? personalIncome(list, meId) : gIncome
-    const pExpense = meId ? personalExpense(list, meId) : gExpense
-    return {
-      group: { income: gIncome, expense: gExpense, balance: gIncome - gExpense },
-      personal: { income: pIncome, expense: pExpense, balance: pIncome - pExpense },
+  function slice(currency: EntryCurrency) {
+    return filterByCurrency(list, currency, defaultCurrency)
+  }
+
+  const dualTotals = useMemo(() => {
+    const build = (currency: EntryCurrency) => {
+      const ranged = filterByCurrency(list, currency, defaultCurrency)
+      const g = groupScopeTotals(ranged)
+      const pIncome = meId ? personalIncome(ranged, meId) : g.income
+      const pExpense = meId ? personalExpense(ranged, meId) : g.expense
+      return {
+        group: g,
+        personal: {
+          income: pIncome,
+          expense: pExpense,
+          balance: Math.round((pIncome - pExpense) * 100) / 100,
+        },
+        settlement: meId ? netBalance(ranged, meId, partnerId) : 0,
+      }
     }
-  }, [list, meId])
+    return { HKD: build('HKD'), AUD: build('AUD') }
+  }, [list, meId, partnerId, defaultCurrency])
 
   const weekMonth = useMemo(() => {
     const now = new Date()
@@ -94,8 +119,10 @@ export function MoneyPage() {
       const d = parseISO(e.date)
       return d >= from && d <= to
     }
-    const sum = (from: Date, to: Date) => {
-      const ranged = list.filter((e) => inRange(e, from, to))
+    const sum = (from: Date, to: Date, currency: EntryCurrency) => {
+      const ranged = filterByCurrency(list, currency, defaultCurrency).filter((e) =>
+        inRange(e, from, to),
+      )
       return {
         group: {
           income: groupIncome(ranged),
@@ -107,17 +134,16 @@ export function MoneyPage() {
         },
       }
     }
-    return { week: sum(ws, we), month: sum(ms, me) }
-  }, [list, meId])
-
-  const settlement = useMemo(() => {
-    if (!meId) return 0
-    return netBalance(list, meId, partnerId)
-  }, [list, meId, partnerId])
+    return {
+      week: { HKD: sum(ws, we, 'HKD'), AUD: sum(ws, we, 'AUD') },
+      month: { HKD: sum(ms, me, 'HKD'), AUD: sum(ms, me, 'AUD') },
+    }
+  }, [list, meId, defaultCurrency])
 
   const chartData = useMemo(() => {
+    const ranged = slice(chartCurrency)
     const map = new Map<string, { date: string; income: number; expense: number }>()
-    for (const e of list) {
+    for (const e of ranged) {
       const key = e.date.slice(0, 7)
       const cur = map.get(key) || { date: key, income: 0, expense: 0 }
       if (e.type === 'income') cur.income += e.amount
@@ -125,9 +151,9 @@ export function MoneyPage() {
       map.set(key, cur)
     }
     return [...map.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-6)
-  }, [list])
+  }, [list, chartCurrency, defaultCurrency])
 
-  function fmt(n: number) {
+  function fmt(n: number, currency: string) {
     return `${currency} ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
   }
 
@@ -139,7 +165,54 @@ export function MoneyPage() {
     setAmount('')
     setNote('')
     setDate(new Date().toISOString().slice(0, 10))
+    setFormCurrency(defaultCurrency)
+    setMyShareInput('')
+    setPartnerShareInput('')
     setShowForm(true)
+  }
+
+  function onAmountChange(raw: string) {
+    setAmount(raw)
+    if (splitMode === 'custom') {
+      const total = Number(raw)
+      const mine = Number(myShareInput)
+      if (Number.isFinite(total) && total > 0 && Number.isFinite(mine) && myShareInput !== '') {
+        setPartnerShareInput(String(Math.round((total - mine) * 100) / 100))
+      }
+    }
+  }
+
+  function onMyShareChange(raw: string) {
+    setMyShareInput(raw)
+    const total = Number(amount)
+    const mine = Number(raw)
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(mine)) {
+      setPartnerShareInput(String(Math.round((total - mine) * 100) / 100))
+    }
+  }
+
+  function onPartnerShareChange(raw: string) {
+    setPartnerShareInput(raw)
+    const total = Number(amount)
+    const theirs = Number(raw)
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(theirs)) {
+      setMyShareInput(String(Math.round((total - theirs) * 100) / 100))
+    }
+  }
+
+  function setSplitAndInit(mode: FormSplit) {
+    setSplitMode(mode)
+    if (mode === 'custom') {
+      const total = Number(amount)
+      if (Number.isFinite(total) && total > 0) {
+        const half = Math.round((total / 2) * 100) / 100
+        setMyShareInput(String(half))
+        setPartnerShareInput(String(Math.round((total - half) * 100) / 100))
+      } else {
+        setMyShareInput('')
+        setPartnerShareInput('')
+      }
+    }
   }
 
   async function save() {
@@ -149,14 +222,37 @@ export function MoneyPage() {
     const payerIsMe = paidBy === 'me'
     const paidById = payerIsMe ? settings.userId : partnerId || 'partner'
     const paidByName = payerIsMe ? meName : partnerLabel
-    const mode: SplitMode = type === 'income' ? 'personal' : splitMode
 
+    let mode: SplitMode = 'personal'
+    if (type === 'expense') {
+      if (splitMode === 'equal') mode = 'equal'
+      else if (splitMode === 'custom') mode = 'custom'
+      else mode = 'personal'
+    }
+
+    const pidPartner = partnerId || 'partner'
     const participantIds =
-      mode === 'shared'
-        ? [settings.userId, partnerId || 'partner'].filter(Boolean)
+      mode === 'equal' || mode === 'custom'
+        ? [settings.userId, pidPartner]
         : [paidById]
     const participantNames =
-      mode === 'shared' ? [meName, partnerLabel] : [paidByName]
+      mode === 'equal' || mode === 'custom' ? [meName, partnerLabel] : [paidByName]
+
+    let shares: Record<string, number> | undefined
+    if (mode === 'custom') {
+      const mine = Number(myShareInput)
+      const theirs = Number(partnerShareInput)
+      if (!Number.isFinite(mine) || !Number.isFinite(theirs) || mine < 0 || theirs < 0) return
+      const sum = Math.round((mine + theirs) * 100) / 100
+      if (Math.abs(sum - n) > 0.02) {
+        alert(t('money.shareSumError', { total: fmt(n, formCurrency), sum: fmt(sum, formCurrency) }))
+        return
+      }
+      shares = {
+        [settings.userId]: Math.round(mine * 100) / 100,
+        [pidPartner]: Math.round(theirs * 100) / 100,
+      }
+    }
 
     const entry: MoneyEntry = {
       id: uid(),
@@ -167,16 +263,20 @@ export function MoneyPage() {
       date,
       createdAt: now,
       updatedAt: now,
+      currency: formCurrency,
       paidById,
       paidByName,
       splitMode: mode,
       participantIds,
       participantNames,
+      shares,
     }
     await db.moneyEntries.put(entry)
     await pushMoneyEntry(entry)
     setAmount('')
     setNote('')
+    setMyShareInput('')
+    setPartnerShareInput('')
     setShowForm(false)
   }
 
@@ -189,41 +289,172 @@ export function MoneyPage() {
 
   const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS
 
+  function CurrencyTotals({
+    currency,
+    group,
+    personal,
+  }: {
+    currency: EntryCurrency
+    group: { income: number; expense: number; balance: number }
+    personal: { income: number; expense: number; balance: number }
+  }) {
+    return (
+      <div className="currency-block">
+        <div className="currency-heading">{currency}</div>
+        <div className="scope-section">
+          <div className="scope-heading">{t('money.groupScope')}</div>
+          <div className="summary-grid">
+            <div className="stat income">
+              <div className="label">{t('money.totalIncome')}</div>
+              <div className="value">{fmt(group.income, currency)}</div>
+            </div>
+            <div className="stat expense">
+              <div className="label">{t('money.totalExpense')}</div>
+              <div className="value">{fmt(group.expense, currency)}</div>
+            </div>
+            <div className="stat" style={{ gridColumn: '1 / -1' }}>
+              <div className="label">{t('money.balance')}</div>
+              <div className="value">{fmt(group.balance, currency)}</div>
+            </div>
+          </div>
+        </div>
+        <div className="scope-section">
+          <div className="scope-heading">{t('money.personalScope')}</div>
+          <div className="summary-grid">
+            <div className="stat income">
+              <div className="label">{t('money.totalIncome')}</div>
+              <div className="value">{fmt(personal.income, currency)}</div>
+            </div>
+            <div className="stat expense">
+              <div className="label">{t('money.totalExpense')}</div>
+              <div className="value">{fmt(personal.expense, currency)}</div>
+            </div>
+            <div className="stat" style={{ gridColumn: '1 / -1' }}>
+              <div className="label">{t('money.balance')}</div>
+              <div className="value">{fmt(personal.balance, currency)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function ScopeBlock({
     title,
     income,
     expense,
+    currency,
   }: {
     title: string
     income: number
     expense: number
+    currency: string
   }) {
     return (
       <div className="scope-block">
         <div className="scope-label">{title}</div>
         <div className="row between muted">
           <span>{t('money.income')}</span>
-          <span className="amount income">{fmt(income)}</span>
+          <span className="amount income">{fmt(income, currency)}</span>
         </div>
         <div className="row between muted">
           <span>{t('money.expense')}</span>
-          <span className="amount expense">{fmt(expense)}</span>
+          <span className="amount expense">{fmt(expense, currency)}</span>
         </div>
+      </div>
+    )
+  }
+
+  function PeriodCard({
+    title,
+    data,
+  }: {
+    title: string
+    data: {
+      HKD: {
+        group: { income: number; expense: number }
+        personal: { income: number; expense: number }
+      }
+      AUD: {
+        group: { income: number; expense: number }
+        personal: { income: number; expense: number }
+      }
+    }
+  }) {
+    return (
+      <div className="card stack">
+        <strong>{title}</strong>
+        {CURRENCIES.map((c) => (
+          <div key={c} className="currency-block compact">
+            <div className="currency-heading">{c}</div>
+            <ScopeBlock
+              title={t('money.groupScope')}
+              income={data[c].group.income}
+              expense={data[c].group.expense}
+              currency={c}
+            />
+            <ScopeBlock
+              title={t('money.personalScope')}
+              income={data[c].personal.income}
+              expense={data[c].personal.expense}
+              currency={c}
+            />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  function SettlementBlock({ currency }: { currency: EntryCurrency }) {
+    const settlement = dualTotals[currency].settlement
+    return (
+      <div className="currency-block compact">
+        <div className="currency-heading">{currency}</div>
+        {Math.abs(settlement) < 0.005 ? (
+          <div className="muted">{t('money.settled')}</div>
+        ) : settlement > 0 ? (
+          <div className="settlement-line owes-you">
+            {t('money.owesYou', { name: partnerLabel, amount: fmt(settlement, currency) })}
+          </div>
+        ) : (
+          <div className="settlement-line you-owe">
+            {t('money.youOwe', {
+              name: partnerLabel,
+              amount: fmt(Math.abs(settlement), currency),
+            })}
+          </div>
+        )}
       </div>
     )
   }
 
   function entryMeta(e: MoneyEntry) {
     const mode = effectiveSplitMode(e)
+    const cur = entryCurrency(e, defaultCurrency)
     const payer = e.paidByName || (e.paidById === meId ? meName : partnerLabel)
     if (e.type === 'income') {
       return t('money.receivedBy', { name: payer })
     }
-    if (mode === 'shared') {
+    if (mode === 'equal') {
       const myShare = meId ? shareForUser(e, meId) : e.amount / 2
-      return `${t('money.shared')} · ${t('money.paidBy')}: ${payer} · ${t('money.myShare')}: ${fmt(myShare)}`
+      return `${t('money.sharedEqual')} · ${t('money.paidBy')}: ${payer} · ${t('money.myShare')}: ${fmt(myShare, cur)}`
+    }
+    if (mode === 'custom') {
+      const map = sharesForEntry(e, meId || 'me', partnerId)
+      const myAmt = meId ? map[meId] ?? 0 : 0
+      const partnerKey = partnerId || 'partner'
+      const partnerAmt = map[partnerKey] ?? Object.entries(map).find(([id]) => id !== meId)?.[1] ?? 0
+      return `${t('money.sharedCustom')} · ${t('money.paidBy')}: ${payer} · ${t('money.myShare')}: ${fmt(myAmt, cur)} · ${partnerLabel}: ${fmt(partnerAmt, cur)}`
     }
     return `${t('money.personal')} · ${t('money.paidBy')}: ${payer}`
+  }
+
+  function splitTag(e: MoneyEntry) {
+    if (e.type !== 'expense') return null
+    const mode = effectiveSplitMode(e)
+    if (mode === 'equal') return <span className="tag shared">{t('money.sharedEqual')}</span>
+    if (mode === 'custom') return <span className="tag shared custom">{t('money.sharedCustom')}</span>
+    return <span className="tag personal">{t('money.personal')}</span>
   }
 
   return (
@@ -235,42 +466,18 @@ export function MoneyPage() {
             {t('money.add')}
           </button>
         </div>
-
-        <div className="scope-section">
-          <div className="scope-heading">{t('money.groupScope')}</div>
-          <div className="summary-grid">
-            <div className="stat income">
-              <div className="label">{t('money.totalIncome')}</div>
-              <div className="value">{fmt(totals.group.income)}</div>
-            </div>
-            <div className="stat expense">
-              <div className="label">{t('money.totalExpense')}</div>
-              <div className="value">{fmt(totals.group.expense)}</div>
-            </div>
-            <div className="stat" style={{ gridColumn: '1 / -1' }}>
-              <div className="label">{t('money.balance')}</div>
-              <div className="value">{fmt(totals.group.balance)}</div>
-            </div>
-          </div>
+        <div className="muted" style={{ fontSize: '0.78rem' }}>
+          {t('money.dualCurrencyHint')}
         </div>
 
-        <div className="scope-section">
-          <div className="scope-heading">{t('money.personalScope')}</div>
-          <div className="summary-grid">
-            <div className="stat income">
-              <div className="label">{t('money.totalIncome')}</div>
-              <div className="value">{fmt(totals.personal.income)}</div>
-            </div>
-            <div className="stat expense">
-              <div className="label">{t('money.totalExpense')}</div>
-              <div className="value">{fmt(totals.personal.expense)}</div>
-            </div>
-            <div className="stat" style={{ gridColumn: '1 / -1' }}>
-              <div className="label">{t('money.balance')}</div>
-              <div className="value">{fmt(totals.personal.balance)}</div>
-            </div>
-          </div>
-        </div>
+        {CURRENCIES.map((c) => (
+          <CurrencyTotals
+            key={c}
+            currency={c}
+            group={dualTotals[c].group}
+            personal={dualTotals[c].personal}
+          />
+        ))}
 
         {settings ? (
           <div className="muted">
@@ -281,56 +488,42 @@ export function MoneyPage() {
 
       <div className="card stack settlement-card">
         <strong>{t('money.settlement')}</strong>
-        {Math.abs(settlement) < 0.005 ? (
-          <div className="muted">{t('money.settled')}</div>
-        ) : settlement > 0 ? (
-          <div className="settlement-line owes-you">
-            {t('money.owesYou', { name: partnerLabel, amount: fmt(settlement) })}
-          </div>
-        ) : (
-          <div className="settlement-line you-owe">
-            {t('money.youOwe', { name: partnerLabel, amount: fmt(Math.abs(settlement)) })}
-          </div>
-        )}
         <div className="muted" style={{ fontSize: '0.78rem' }}>
           {t('money.settlementHint')}
         </div>
+        {CURRENCIES.map((c) => (
+          <SettlementBlock key={c} currency={c} />
+        ))}
       </div>
 
-      <div className="card stack">
-        <strong>{t('money.weekly')}</strong>
-        <ScopeBlock
-          title={t('money.groupScope')}
-          income={weekMonth.week.group.income}
-          expense={weekMonth.week.group.expense}
-        />
-        <ScopeBlock
-          title={t('money.personalScope')}
-          income={weekMonth.week.personal.income}
-          expense={weekMonth.week.personal.expense}
-        />
-      </div>
-
-      <div className="card stack">
-        <strong>{t('money.monthly')}</strong>
-        <ScopeBlock
-          title={t('money.groupScope')}
-          income={weekMonth.month.group.income}
-          expense={weekMonth.month.group.expense}
-        />
-        <ScopeBlock
-          title={t('money.personalScope')}
-          income={weekMonth.month.personal.income}
-          expense={weekMonth.month.personal.expense}
-        />
-      </div>
-
-      {chartData.length > 0 ? (
+      {settings?.roomCode ? (
         <div className="card stack">
-          <strong>{t('money.chart')}</strong>
-          <div className="muted" style={{ fontSize: '0.78rem' }}>
-            {t('money.chartHint')}
-          </div>
+          <strong>{t('money.groupMembers')}</strong>
+          <RoomMembersList members={memberList} meId={meId} />
+        </div>
+      ) : null}
+
+      <PeriodCard title={t('money.weekly')} data={weekMonth.week} />
+      <PeriodCard title={t('money.monthly')} data={weekMonth.month} />
+
+      <div className="card stack">
+        <strong>{t('money.chart')}</strong>
+        <div className="chip-row">
+          {CURRENCIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`chip${chartCurrency === c ? ' active' : ''}`}
+              onClick={() => setChartCurrency(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <div className="muted" style={{ fontSize: '0.78rem' }}>
+          {t('money.chartHint')}
+        </div>
+        {chartData.length > 0 ? (
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
@@ -343,45 +536,47 @@ export function MoneyPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      ) : null}
+        ) : (
+          <div className="empty">{t('money.noChartData')}</div>
+        )}
+      </div>
 
       <div className="card">
         {list.length === 0 ? (
           <div className="empty">{t('money.empty')}</div>
         ) : (
-          list.map((e) => (
-            <div key={e.id} className="money-item">
-              <div>
+          list.map((e) => {
+            const cur = entryCurrency(e, defaultCurrency)
+            return (
+              <div key={e.id} className="money-item">
                 <div>
-                  <strong>{t(`money.categories.${e.category}`, e.category)}</strong>
-                  {effectiveSplitMode(e) === 'shared' && e.type === 'expense' ? (
-                    <span className="tag shared">{t('money.shared')}</span>
-                  ) : (
-                    <span className="tag personal">{t('money.personal')}</span>
-                  )}
+                  <div>
+                    <strong>{t(`money.categories.${e.category}`, e.category)}</strong>
+                    <span className="tag currency-tag">{cur}</span>
+                    {splitTag(e)}
+                  </div>
+                  <div className="muted">
+                    {e.date}
+                    {e.note ? ` · ${e.note}` : ''}
+                  </div>
+                  <div className="muted" style={{ fontSize: '0.78rem' }}>
+                    {entryMeta(e)}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn danger small"
+                    onClick={() => void remove(e)}
+                  >
+                    {t('todos.delete')}
+                  </button>
                 </div>
-                <div className="muted">
-                  {e.date}
-                  {e.note ? ` · ${e.note}` : ''}
+                <div className={`amount ${e.type}`}>
+                  {e.type === 'income' ? '+' : '-'}
+                  {fmt(e.amount, cur)}
                 </div>
-                <div className="muted" style={{ fontSize: '0.78rem' }}>
-                  {entryMeta(e)}
-                </div>
-                <button
-                  type="button"
-                  className="btn danger small"
-                  onClick={() => void remove(e)}
-                >
-                  {t('todos.delete')}
-                </button>
               </div>
-              <div className={`amount ${e.type}`}>
-                {e.type === 'income' ? '+' : '-'}
-                {fmt(e.amount)}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -413,6 +608,22 @@ export function MoneyPage() {
               </button>
             </div>
 
+            <div className="field">
+              <label>{t('money.entryCurrency')}</label>
+              <div className="chip-row">
+                {CURRENCIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`chip${formCurrency === c ? ' active' : ''}`}
+                    onClick={() => setFormCurrency(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {type === 'expense' ? (
               <div className="field">
                 <label>{t('money.splitMode')}</label>
@@ -420,16 +631,23 @@ export function MoneyPage() {
                   <button
                     type="button"
                     className={`chip${splitMode === 'personal' ? ' active' : ''}`}
-                    onClick={() => setSplitMode('personal')}
+                    onClick={() => setSplitAndInit('personal')}
                   >
                     {t('money.personal')}
                   </button>
                   <button
                     type="button"
-                    className={`chip${splitMode === 'shared' ? ' active' : ''}`}
-                    onClick={() => setSplitMode('shared')}
+                    className={`chip${splitMode === 'equal' ? ' active' : ''}`}
+                    onClick={() => setSplitAndInit('equal')}
                   >
-                    {t('money.shared')}
+                    {t('money.sharedEqual')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip${splitMode === 'custom' ? ' active' : ''}`}
+                    onClick={() => setSplitAndInit('custom')}
+                  >
+                    {t('money.sharedCustom')}
                   </button>
                 </div>
               </div>
@@ -460,10 +678,41 @@ export function MoneyPage() {
               <input
                 inputMode="decimal"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => onAmountChange(e.target.value)}
                 placeholder="0.00"
               />
             </div>
+
+            {type === 'expense' && splitMode === 'custom' ? (
+              <>
+                <div className="field">
+                  <label>
+                    {t('money.myShare')} ({meName})
+                  </label>
+                  <input
+                    inputMode="decimal"
+                    value={myShareInput}
+                    onChange={(e) => onMyShareChange(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="field">
+                  <label>
+                    {t('money.partnerShare')} ({partnerLabel})
+                  </label>
+                  <input
+                    inputMode="decimal"
+                    value={partnerShareInput}
+                    onChange={(e) => onPartnerShareChange(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="muted" style={{ fontSize: '0.78rem' }}>
+                  {t('money.customShareHint')}
+                </div>
+              </>
+            ) : null}
+
             <div className="field">
               <label>{t('money.category')}</label>
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -496,3 +745,4 @@ export function MoneyPage() {
     </>
   )
 }
+

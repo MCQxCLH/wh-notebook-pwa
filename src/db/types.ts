@@ -45,7 +45,15 @@ export interface JournalComment {
 }
 
 export type MoneyType = 'income' | 'expense'
-export type SplitMode = 'personal' | 'shared'
+/** Entry currency — each money row stores its own. */
+export type EntryCurrency = 'HKD' | 'AUD'
+/**
+ * personal = only payer's expense
+ * equal = shared equally among participants
+ * custom = absolute shares in `shares` (userId → amount)
+ * Legacy value `shared` is treated as `equal`.
+ */
+export type SplitMode = 'personal' | 'equal' | 'custom'
 
 export interface MoneyEntry {
   id: string
@@ -57,11 +65,16 @@ export interface MoneyEntry {
   createdAt: string
   updatedAt: string
   deleted?: boolean
+  /** Per-entry currency. Missing → treat as settings default or HKD. */
+  currency?: EntryCurrency | string
   paidById?: string
   paidByName?: string
-  splitMode?: SplitMode // default treat missing as 'personal'
+  /** Legacy records may still have `shared` — treat as equal. */
+  splitMode?: SplitMode | 'shared'
   participantIds?: string[]
   participantNames?: string[]
+  /** Custom split: absolute amount each participant owes (must sum ≈ amount). */
+  shares?: Record<string, number>
 }
 
 export interface RoomMember {
@@ -73,6 +86,7 @@ export interface RoomMember {
 export interface AppSettings {
   id: 'settings'
   language: Lang
+  /** Default currency for *new* entries only (not a global display switch). */
   currency: string
   whStart: string
   whEnd: string

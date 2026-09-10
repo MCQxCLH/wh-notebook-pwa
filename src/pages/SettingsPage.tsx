@@ -12,6 +12,7 @@ import {
   upsertSelfRoomMember,
 } from '../sync/syncService'
 import { generateRoomCode, normalizeRoomCode } from '../utils/roomCode'
+import { RoomMembersList } from '../components/RoomMembersList'
 import i18n from '../i18n'
 
 const PRESET_CURRENCIES = ['HKD', 'AUD'] as const
@@ -19,6 +20,7 @@ const PRESET_CURRENCIES = ['HKD', 'AUD'] as const
 export function SettingsPage() {
   const { t } = useTranslation()
   const settings = useLiveQuery(() => ensureSettings(), [])
+  const members = useLiveQuery(() => db.roomMembers.toArray(), [])
   const [displayName, setDisplayName] = useState('')
   const [partnerName, setPartnerName] = useState('')
   const [currency, setCurrency] = useState('HKD')
@@ -174,6 +176,7 @@ export function SettingsPage() {
       roomCode: null,
       updatedAt: new Date().toISOString(),
     })
+    await db.roomMembers.clear()
     setMsg(t('settings.leaveRoom'))
   }
 
@@ -269,7 +272,7 @@ export function SettingsPage() {
             />
           ) : null}
           <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
-            {t('settings.currencyHint', { code: activeCurrency || 'HKD' })}
+            {t('settings.currencyDefaultHint', { code: activeCurrency || 'HKD' })}
           </div>
         </div>
         <div className="field">
@@ -315,6 +318,7 @@ export function SettingsPage() {
                 {copied ? t('settings.copied') : t('settings.copyCode')}
               </button>
             </div>
+            <RoomMembersList members={members ?? []} meId={settings.userId} />
             <button type="button" className="btn danger" onClick={() => void leaveRoom()}>
               {t('settings.leaveRoom')}
             </button>
