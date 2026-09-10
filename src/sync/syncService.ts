@@ -40,6 +40,20 @@ function setStatus(s: SyncStatus) {
   statusListeners.forEach((cb) => cb(s))
 }
 
+/** Firestore rejects `undefined` field values — strip them before write. */
+function stripUndefined(data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(data)) {
+    if (v === undefined) continue
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = stripUndefined(v as Record<string, unknown>)
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
 async function pushDoc(
   roomCode: string,
   col: string,
@@ -48,43 +62,51 @@ async function pushDoc(
 ) {
   const fb = getFirebase()
   if (!fb) return
-  await setDoc(doc(fb.db, 'rooms', roomCode, col, id), data, { merge: true })
+  await ensureAnonymousAuth()
+  const clean = stripUndefined({ ...data })
+  await setDoc(doc(fb.db, 'rooms', roomCode, col, id), clean, { merge: true })
 }
 
 export async function pushTodo(todo: Todo) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'todos', todo.id, { ...todo })
+  await pushDoc(s.roomCode, 'todos', todo.id, { ...todo } as unknown as Record<string, unknown>)
 }
 
 export async function pushReminder(r: Reminder) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'reminders', r.id, { ...r })
+  await pushDoc(s.roomCode, 'reminders', r.id, { ...r } as unknown as Record<string, unknown>)
 }
 
 export async function pushJournalEntry(e: JournalEntry) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'journalEntries', e.id, { ...e })
+  await pushDoc(s.roomCode, 'journalEntries', e.id, { ...e } as unknown as Record<string, unknown>)
 }
 
 export async function pushJournalComment(c: JournalComment) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'journalComments', c.id, { ...c })
+  await pushDoc(s.roomCode, 'journalComments', c.id, { ...c } as unknown as Record<string, unknown>)
 }
 
 export async function pushMoneyEntry(m: MoneyEntry) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'moneyEntries', m.id, { ...m })
+  try {
+    await pushDoc(s.roomCode, 'moneyEntries', m.id, { ...m } as unknown as Record<string, unknown>)
+  } catch (err) {
+    console.error('[sync] pushMoneyEntry failed', err)
+    setStatus('error')
+    throw err
+  }
 }
 
 export async function pushRoomMember(m: RoomMember) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
-  await pushDoc(s.roomCode, 'members', m.id, { ...m })
+  await pushDoc(s.roomCode, 'members', m.id, { ...m } as unknown as Record<string, unknown>)
 }
 
 /** Upsert current user into local roomMembers and push to Firestore. */
@@ -240,9 +262,12 @@ export async function startSync(): Promise<void> {
     )
 
     await upsertSelfRoomMember()
+    // Re-push local docs so entries that previously failed (e.g. undefined fields) reach peers.
+    await pushAllLocal()
 
     setStatus('synced')
-  } catch {
+  } catch (err) {
+    console.error('[sync] startSync failed', err)
     setStatus('error')
   }
 }

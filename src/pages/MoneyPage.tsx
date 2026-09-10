@@ -272,7 +272,11 @@ export function MoneyPage() {
       shares,
     }
     await db.moneyEntries.put(entry)
-    await pushMoneyEntry(entry)
+    try {
+      await pushMoneyEntry(entry)
+    } catch {
+      alert(t('money.syncPushFailed'))
+    }
     setAmount('')
     setNote('')
     setMyShareInput('')

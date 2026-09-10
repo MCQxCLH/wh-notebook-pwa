@@ -96,7 +96,8 @@
     "entryCurrency": "此筆貨幣",
     "dualCurrencyHint": "港幣與澳幣分別統計，互不換算。",
     "noChartData": "此貨幣尚無紀錄",
-    "groupMembers": "房間成員"
+    "groupMembers": "房間成員",
+    "syncPushFailed": "已存本機，但同步到房間失敗。請確認兩邊加入同一個房間代碼後重試。"
   },
   "settings": {
     "title": "設定",

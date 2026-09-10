@@ -96,7 +96,8 @@
     "entryCurrency": "Currency for this entry",
     "dualCurrencyHint": "Totals are shown separately in HKD and AUD (no conversion).",
     "noChartData": "No entries in this currency yet",
-    "groupMembers": "Room members"
+    "groupMembers": "Room members",
+    "syncPushFailed": "Saved on this device, but sync to the room failed. Check you both joined the same room code, then try again."
   },
   "settings": {
     "title": "Settings",
