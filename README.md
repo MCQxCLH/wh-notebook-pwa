@@ -60,3 +60,8 @@ Without Firebase env vars the app stays local-only. With Firebase configured, cr
 ## Deploy
 
 Pushing to `main` runs `.github/workflows/deploy.yml` and deploys `dist/` to GitHub Pages (`base: /wh-notebook-pwa/`).
+
+## Deploy notes
+
+- **GitHub Pages** is configured from the `gh-pages` branch (static `dist/` output). Expected URL: https://mcqxclh.github.io/wh-notebook-pwa/
+- The Actions workflow is saved as [`deploy.github-actions.yml`](./deploy.github-actions.yml). To enable auto-deploy on push to `main`, copy it to `.github/workflows/deploy.yml` (requires a GitHub token/PAT with the `workflow` scope) and switch Pages source to **GitHub Actions**.
