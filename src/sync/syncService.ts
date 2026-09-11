@@ -15,7 +15,12 @@ import type {
   AppSettings,
   RoomMember,
 } from '../db/types'
-import { ensureAnonymousAuth, getFirebase, isFirebaseConfigured } from './firebase'
+import {
+  ensureSignedInUser,
+  getFirebase,
+  isFirebaseConfigured,
+} from './firebase'
+import type { User } from 'firebase/auth'
 
 type SyncStatus = 'local' | 'connecting' | 'synced' | 'error'
 
@@ -62,7 +67,11 @@ async function pushDoc(
 ) {
   const fb = getFirebase()
   if (!fb) return
-  await ensureAnonymousAuth()
+  const user = await ensureSignedInUser()
+  if (!user) {
+    console.warn('[sync] push skipped — email sign-in required')
+    return
+  }
   const clean = stripUndefined({ ...data })
   await setDoc(doc(fb.db, 'rooms', roomCode, col, id), clean, { merge: true })
 }
@@ -150,6 +159,133 @@ async function mergeCollection<T extends { id: string; updatedAt: string }>(
   await put(pickNewer(local, remote))
 }
 
+/**
+ * Remap local money identity from old random / placeholder ids to stable auth uid.
+ * Also soft-deletes the old room member when possible.
+ */
+export async function migrateLocalMoneyIdentity(
+  oldUserId: string | null | undefined,
+  authUid: string,
+  newDisplayName?: string,
+): Promise<void> {
+  if (!authUid) return
+  const aliases = new Set<string>()
+  if (oldUserId && oldUserId !== authUid) aliases.add(oldUserId)
+  aliases.add('partner')
+
+  if (aliases.size === 0 || (aliases.size === 1 && aliases.has('partner') && !oldUserId)) {
+    // Still remap bare 'partner' keys if present; always persist settings.userId below.
+  }
+
+  const entries = await db.moneyEntries.toArray()
+  const now = new Date().toISOString()
+  const updated: MoneyEntry[] = []
+
+  for (const e of entries) {
+    let changed = false
+    const next: MoneyEntry = { ...e }
+
+    if (next.paidById && aliases.has(next.paidById)) {
+      next.paidById = authUid
+      if (newDisplayName) next.paidByName = newDisplayName
+      changed = true
+    }
+
+    if (next.participantIds?.length) {
+      const mapped = next.participantIds.map((id) => (aliases.has(id) ? authUid : id))
+      // Dedupe after remap
+      const deduped = [...new Set(mapped)]
+      if (deduped.join('|') !== next.participantIds.join('|')) {
+        next.participantIds = deduped
+        changed = true
+      }
+    }
+
+    if (next.shares) {
+      const newShares: Record<string, number> = {}
+      let sharesChanged = false
+      for (const [k, v] of Object.entries(next.shares)) {
+        const nk = aliases.has(k) ? authUid : k
+        if (nk !== k) sharesChanged = true
+        newShares[nk] = (newShares[nk] ?? 0) + v
+      }
+      if (sharesChanged) {
+        next.shares = newShares
+        changed = true
+      }
+    }
+
+    if (changed) {
+      next.updatedAt = now
+      updated.push(next)
+    }
+  }
+
+  if (updated.length) {
+    await db.moneyEntries.bulkPut(updated)
+  }
+
+  // Soft-delete old room member doc (not auth uid)
+  if (oldUserId && oldUserId !== authUid) {
+    const tombstone: RoomMember = {
+      id: oldUserId,
+      displayName: '(migrated)',
+      updatedAt: now,
+      deleted: true,
+    }
+    try {
+      const s = await ensureSettings()
+      if (s.roomCode && isFirebaseConfigured()) {
+        await pushDoc(s.roomCode, 'members', oldUserId, {
+          ...tombstone,
+        } as unknown as Record<string, unknown>)
+      }
+    } catch (err) {
+      console.warn('[sync] could not push deleted old member', err)
+    }
+    await db.roomMembers.delete(oldUserId)
+  }
+
+  const settings = await ensureSettings()
+  await db.settings.put({
+    ...settings,
+    userId: authUid,
+    displayName: newDisplayName?.trim() || settings.displayName,
+    updatedAt: now,
+  })
+}
+
+/**
+ * After email auth succeeds: bind settings.userId, migrate money, sync room.
+ */
+export async function applyAuthenticatedUser(user: User): Promise<void> {
+  const settings = await ensureSettings()
+  const oldUserId = settings.userId
+  const preferredName =
+    user.displayName?.trim() ||
+    settings.displayName?.trim() ||
+    (user.email ? user.email.split('@')[0] : '') ||
+    'Traveler'
+
+  await migrateLocalMoneyIdentity(oldUserId, user.uid, preferredName)
+
+  if (settings.roomCode) {
+    await startSync()
+    await upsertSelfRoomMember()
+    await pushAllLocal()
+  } else {
+    // Ensure local member row uses auth uid even without room yet
+    await db.roomMembers.put({
+      id: user.uid,
+      displayName: preferredName,
+      updatedAt: new Date().toISOString(),
+    })
+    if (oldUserId && oldUserId !== user.uid) {
+      await db.roomMembers.delete(oldUserId)
+    }
+  }
+}
+
 export async function startSync(): Promise<void> {
   stopSync()
   if (!isFirebaseConfigured()) {
@@ -164,7 +300,22 @@ export async function startSync(): Promise<void> {
 
   setStatus('connecting')
   try {
-    await ensureAnonymousAuth()
+    const user = await ensureSignedInUser()
+    if (!user) {
+      console.warn('[sync] startSync skipped — email sign-in required')
+      setStatus('local')
+      return
+    }
+
+    // Keep settings.userId aligned with auth uid
+    if (settings.userId !== user.uid) {
+      await migrateLocalMoneyIdentity(
+        settings.userId,
+        user.uid,
+        user.displayName || settings.displayName,
+      )
+    }
+
     const fb = getFirebase()
     if (!fb) {
       setStatus('local')
@@ -209,10 +360,15 @@ export async function startSync(): Promise<void> {
       {
         name: 'members',
         apply: async (data) => {
+          const member = data as unknown as RoomMember
+          if (member.deleted) {
+            await db.roomMembers.delete(member.id)
+            return
+          }
           await mergeCollection(
             (id) => db.roomMembers.get(id),
             (item) => db.roomMembers.put(item),
-            data as unknown as RoomMember,
+            member,
           )
         },
       },
@@ -223,7 +379,12 @@ export async function startSync(): Promise<void> {
         collection(fb.db, 'rooms', roomCode, col.name),
         async (snap) => {
           for (const d of snap.docChanges()) {
-            if (d.type === 'removed') continue
+            if (d.type === 'removed') {
+              if (col.name === 'members') {
+                await db.roomMembers.delete(d.doc.id)
+              }
+              continue
+            }
             await col.apply({ id: d.doc.id, ...d.doc.data() })
           }
           setStatus('synced')
@@ -280,6 +441,8 @@ export function stopSync() {
 export async function pushAllLocal(): Promise<void> {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
+  const user = await ensureSignedInUser()
+  if (!user) return
   const [todos, reminders, entries, comments, money, members] = await Promise.all([
     db.todos.toArray(),
     db.reminders.toArray(),
@@ -294,7 +457,7 @@ export async function pushAllLocal(): Promise<void> {
     ...entries.map((e) => pushJournalEntry(e)),
     ...comments.map((c) => pushJournalComment(c)),
     ...money.map((m) => pushMoneyEntry(m)),
-    ...members.map((m) => pushRoomMember(m)),
+    ...members.filter((m) => !m.deleted).map((m) => pushRoomMember(m)),
     pushSettingsPartial(s),
   ])
   await upsertSelfRoomMember()

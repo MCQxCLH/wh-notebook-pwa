@@ -55,7 +55,10 @@ export function MoneyPage() {
         ),
     [],
   )
-  const members = useLiveQuery(() => db.roomMembers.toArray(), [])
+  const members = useLiveQuery(
+    () => db.roomMembers.filter((m) => !m.deleted).toArray(),
+    [],
+  )
 
   const [showForm, setShowForm] = useState(false)
   const [type, setType] = useState<MoneyType>('expense')
@@ -220,7 +223,13 @@ export function MoneyPage() {
     if (!Number.isFinite(n) || n <= 0 || !settings?.userId) return
     const now = new Date().toISOString()
     const payerIsMe = paidBy === 'me'
-    const paidById = payerIsMe ? settings.userId : partnerId || 'partner'
+    // Prefer real room-member auth uid; never invent a new random id
+    const pidPartner = partnerId || null
+    if ((splitMode === 'equal' || splitMode === 'custom' || paidBy === 'partner') && !pidPartner) {
+      alert(t('money.needPartnerMember'))
+      return
+    }
+    const paidById = payerIsMe ? settings.userId : (pidPartner as string)
     const paidByName = payerIsMe ? meName : partnerLabel
 
     let mode: SplitMode = 'personal'
@@ -230,10 +239,9 @@ export function MoneyPage() {
       else mode = 'personal'
     }
 
-    const pidPartner = partnerId || 'partner'
     const participantIds =
       mode === 'equal' || mode === 'custom'
-        ? [settings.userId, pidPartner]
+        ? [settings.userId, pidPartner as string]
         : [paidById]
     const participantNames =
       mode === 'equal' || mode === 'custom' ? [meName, partnerLabel] : [paidByName]
@@ -250,7 +258,7 @@ export function MoneyPage() {
       }
       shares = {
         [settings.userId]: Math.round(mine * 100) / 100,
-        [pidPartner]: Math.round(theirs * 100) / 100,
+        [pidPartner as string]: Math.round(theirs * 100) / 100,
       }
     }
 
@@ -643,6 +651,7 @@ export function MoneyPage() {
                     type="button"
                     className={`chip${splitMode === 'equal' ? ' active' : ''}`}
                     onClick={() => setSplitAndInit('equal')}
+                    disabled={!partnerId}
                   >
                     {t('money.sharedEqual')}
                   </button>
@@ -650,6 +659,7 @@ export function MoneyPage() {
                     type="button"
                     className={`chip${splitMode === 'custom' ? ' active' : ''}`}
                     onClick={() => setSplitAndInit('custom')}
+                    disabled={!partnerId}
                   >
                     {t('money.sharedCustom')}
                   </button>
@@ -671,10 +681,16 @@ export function MoneyPage() {
                   type="button"
                   className={`chip${paidBy === 'partner' ? ' active' : ''}`}
                   onClick={() => setPaidBy('partner')}
+                  disabled={!partnerId}
                 >
                   {t('money.partner')} ({partnerLabel})
                 </button>
               </div>
+              {!partnerId ? (
+                <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+                  {t('money.needPartnerMember')}
+                </div>
+              ) : null}
             </div>
 
             <div className="field">

@@ -1,10 +1,20 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { User } from 'firebase/auth'
 import { db, ensureSettings } from '../db/database'
 import type { Lang } from '../db/types'
-import { isFirebaseConfigured } from '../sync/firebase'
 import {
+  authErrorMessage,
+  getCurrentEmailUser,
+  isFirebaseConfigured,
+  registerWithEmail,
+  signInWithEmail,
+  signOutUser,
+  subscribeAuth,
+} from '../sync/firebase'
+import {
+  applyAuthenticatedUser,
   pushAllLocal,
   pushSettingsPartial,
   startSync,
@@ -20,7 +30,10 @@ const PRESET_CURRENCIES = ['HKD', 'AUD'] as const
 export function SettingsPage() {
   const { t } = useTranslation()
   const settings = useLiveQuery(() => ensureSettings(), [])
-  const members = useLiveQuery(() => db.roomMembers.toArray(), [])
+  const members = useLiveQuery(
+    () => db.roomMembers.filter((m) => !m.deleted).toArray(),
+    [],
+  )
   const [displayName, setDisplayName] = useState('')
   const [partnerName, setPartnerName] = useState('')
   const [currency, setCurrency] = useState('HKD')
@@ -32,6 +45,11 @@ export function SettingsPage() {
   const [copied, setCopied] = useState(false)
   const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>('default')
   const [msg, setMsg] = useState('')
+  const [authUser, setAuthUser] = useState<User | null>(() => getCurrentEmailUser())
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authMsg, setAuthMsg] = useState('')
 
   useEffect(() => {
     if (!settings) return
@@ -56,7 +74,12 @@ export function SettingsPage() {
     else setPerm(Notification.permission)
   }, [])
 
+  useEffect(() => {
+    return subscribeAuth((u) => setAuthUser(u))
+  }, [])
+
   const firebaseOk = isFirebaseConfigured()
+  const signedIn = Boolean(authUser)
 
   async function persistSettings(partial: {
     displayName?: string
@@ -77,7 +100,7 @@ export function SettingsPage() {
     }
     await db.settings.put(next)
     await pushSettingsPartial(next)
-    if (settings.roomCode) {
+    if (settings.roomCode && signedIn) {
       await upsertSelfRoomMember()
     }
     return next
@@ -125,10 +148,79 @@ export function SettingsPage() {
     }
   }
 
+  function mapAuthError(err: unknown): string {
+    const key = authErrorMessage(err)
+    return t(`settings.authErrors.${key}`)
+  }
+
+  async function handleRegister() {
+    if (!firebaseOk) {
+      setAuthMsg(t('settings.firebaseMissing'))
+      return
+    }
+    if (!email.trim() || password.length < 6) {
+      setAuthMsg(t('settings.authErrors.weakPassword'))
+      return
+    }
+    setAuthBusy(true)
+    setAuthMsg('')
+    try {
+      const user = await registerWithEmail(email, password, displayName.trim() || undefined)
+      await applyAuthenticatedUser(user)
+      setPassword('')
+      setAuthMsg(t('settings.authRegistered'))
+    } catch (err) {
+      setAuthMsg(mapAuthError(err))
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  async function handleSignIn() {
+    if (!firebaseOk) {
+      setAuthMsg(t('settings.firebaseMissing'))
+      return
+    }
+    if (!email.trim() || !password) {
+      setAuthMsg(t('settings.authErrors.badCredentials'))
+      return
+    }
+    setAuthBusy(true)
+    setAuthMsg('')
+    try {
+      const user = await signInWithEmail(email, password)
+      await applyAuthenticatedUser(user)
+      setPassword('')
+      setAuthMsg(t('settings.authSignedIn'))
+    } catch (err) {
+      setAuthMsg(mapAuthError(err))
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  async function handleSignOut() {
+    setAuthBusy(true)
+    setAuthMsg('')
+    try {
+      stopSync()
+      await signOutUser()
+      setAuthMsg(t('settings.authSignedOut'))
+    } catch (err) {
+      setAuthMsg(mapAuthError(err))
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
   async function createRoom() {
     if (!settings) return
     if (!firebaseOk) {
       setMsg(t('settings.firebaseMissing'))
+      return
+    }
+    if (!signedIn) {
+      setMsg(t('settings.signInRequiredForRoom'))
       return
     }
     const code = generateRoomCode()
@@ -137,6 +229,7 @@ export function SettingsPage() {
       displayName: displayName.trim() || settings.displayName,
       partnerName: partnerName.trim(),
       roomCode: code,
+      userId: authUser!.uid,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
@@ -152,6 +245,10 @@ export function SettingsPage() {
       setMsg(t('settings.firebaseMissing'))
       return
     }
+    if (!signedIn) {
+      setMsg(t('settings.signInRequiredForRoom'))
+      return
+    }
     const code = normalizeRoomCode(joinCode)
     if (code.length < 4) return
     const next = {
@@ -159,6 +256,7 @@ export function SettingsPage() {
       displayName: displayName.trim() || settings.displayName,
       partnerName: partnerName.trim(),
       roomCode: code,
+      userId: authUser!.uid,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
@@ -290,6 +388,75 @@ export function SettingsPage() {
       </div>
 
       <div className="card stack">
+        <strong>{t('settings.account')}</strong>
+        <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+          {t('settings.accountHint')}
+        </p>
+        {signedIn && authUser ? (
+          <>
+            <div className="field">
+              <label>{t('settings.accountEmail')}</label>
+              <div>{authUser.email}</div>
+            </div>
+            <div className="field">
+              <label>{t('settings.displayName')}</label>
+              <div>{authUser.displayName || displayName || '—'}</div>
+            </div>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={authBusy}
+              onClick={() => void handleSignOut()}
+            >
+              {t('settings.signOut')}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <label>{t('settings.accountEmail')}</label>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+            </div>
+            <div className="field">
+              <label>{t('settings.accountPassword')}</label>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                className="btn grow"
+                disabled={authBusy || !firebaseOk}
+                onClick={() => void handleRegister()}
+              >
+                {t('settings.register')}
+              </button>
+              <button
+                type="button"
+                className="btn secondary grow"
+                disabled={authBusy || !firebaseOk}
+                onClick={() => void handleSignIn()}
+              >
+                {t('settings.signIn')}
+              </button>
+            </div>
+          </>
+        )}
+        {authMsg ? <div className="muted">{authMsg}</div> : null}
+      </div>
+
+      <div className="card stack">
         <strong>{t('settings.notifications')}</strong>
         <div className="muted">{permLabel}</div>
         <p className="muted" style={{ margin: 0 }}>
@@ -305,6 +472,11 @@ export function SettingsPage() {
         <div className="muted">
           {firebaseOk ? t('settings.firebaseReady') : t('settings.firebaseMissing')}
         </div>
+        {!signedIn ? (
+          <div className="muted" style={{ fontSize: '0.85rem' }}>
+            {t('settings.signInRequiredForRoom')}
+          </div>
+        ) : null}
         {settings.roomCode ? (
           <>
             <div className="row between">
@@ -325,7 +497,12 @@ export function SettingsPage() {
           </>
         ) : (
           <>
-            <button type="button" className="btn" onClick={() => void createRoom()}>
+            <button
+              type="button"
+              className="btn"
+              disabled={!signedIn}
+              onClick={() => void createRoom()}
+            >
               {t('settings.createRoom')}
             </button>
             <div className="row">
@@ -340,8 +517,14 @@ export function SettingsPage() {
                 placeholder={t('settings.roomCode')}
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
+                disabled={!signedIn}
               />
-              <button type="button" className="btn secondary" onClick={() => void joinRoom()}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={!signedIn}
+                onClick={() => void joinRoom()}
+              >
                 {t('settings.joinRoom')}
               </button>
             </div>

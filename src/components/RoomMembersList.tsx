@@ -11,7 +11,7 @@ export function RoomMembersList({
   compact?: boolean
 }) {
   const { t } = useTranslation()
-  const sorted = [...members].sort((a, b) => {
+  const sorted = [...members].filter((m) => !m.deleted).sort((a, b) => {
     if (meId && a.id === meId) return -1
     if (meId && b.id === meId) return 1
     return a.displayName.localeCompare(b.displayName)

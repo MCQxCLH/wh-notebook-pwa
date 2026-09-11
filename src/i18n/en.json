@@ -21,7 +21,10 @@
     "setReminder": "Set reminder",
     "clearReminder": "Clear reminder",
     "moveUp": "Move up",
-    "moveDown": "Move down"
+    "moveDown": "Move down",
+    "editHint": "Tap the title or Edit to change the title and notes.",
+    "tapToEdit": "Tap to edit",
+    "notesPlaceholder": "Optional notes…"
   },
   "reminders": {
     "title": "Reminders",
@@ -97,7 +100,8 @@
     "dualCurrencyHint": "Totals are shown separately in HKD and AUD (no conversion).",
     "noChartData": "No entries in this currency yet",
     "groupMembers": "Room members",
-    "syncPushFailed": "Saved on this device, but sync to the room failed. Check you both joined the same room code, then try again."
+    "syncPushFailed": "Saved on this device, but sync to the room failed. Check you both joined the same room code, then try again.",
+    "needPartnerMember": "Sign in and join the same room as your partner before choosing them or splitting."
   },
   "settings": {
     "title": "Settings",
@@ -135,7 +139,28 @@
     "currencyDefaultHint": "Used as the default when adding a new money entry. Each entry stores its own HKD/AUD.",
     "members": "Members in this room",
     "you": "you",
-    "waitingPartner": "Waiting for partner to join"
+    "waitingPartner": "Waiting for partner to join",
+    "account": "Account",
+    "accountHint": "Use the same email and password on every device, then join the same room code so money counts as one person.",
+    "accountEmail": "Email",
+    "accountPassword": "Password",
+    "register": "Register",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "authRegistered": "Registered — stable identity linked",
+    "authSignedIn": "Signed in",
+    "authSignedOut": "Signed out",
+    "signInRequiredForRoom": "Sign in first to create or join a room.",
+    "authErrors": {
+      "emailInUse": "Email already in use — try signing in",
+      "invalidEmail": "Invalid email address",
+      "weakPassword": "Password must be at least 6 characters",
+      "badCredentials": "Wrong email or password",
+      "tooManyRequests": "Too many attempts — try again later",
+      "providerDisabled": "Email/Password is not enabled in Firebase Console",
+      "network": "Network error — check your connection",
+      "unknown": "Sign-in failed — try again"
+    }
   },
   "common": {
     "loading": "Loading…",

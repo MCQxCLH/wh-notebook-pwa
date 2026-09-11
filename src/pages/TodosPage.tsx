@@ -71,6 +71,7 @@ export function TodosPage() {
     const next = {
       ...editing,
       title: editing.title.trim(),
+      notes: editing.notes?.trim() ? editing.notes.trim() : undefined,
       updatedAt: new Date().toISOString(),
     }
     if (!next.title) return
@@ -149,15 +150,26 @@ export function TodosPage() {
           {todo.completed ? '✓' : ''}
         </button>
         <div className="grow">
-          <div className="todo-title">{todo.title}</div>
-          {todo.notes ? <div className="muted">{todo.notes}</div> : null}
+          <button
+            type="button"
+            className="todo-title-btn"
+            onClick={() => setEditing(todo)}
+            title={t('todos.tapToEdit')}
+          >
+            <div className="todo-title">{todo.title}</div>
+            {todo.notes ? <div className="muted">{todo.notes}</div> : null}
+          </button>
           {todo.reminderAt ? (
             <div className="muted">
               ⏰ {new Date(todo.reminderAt).toLocaleString()}
             </div>
           ) : null}
           <div className="actions">
-            <button type="button" className="btn ghost small" onClick={() => setEditing(todo)}>
+            <button
+              type="button"
+              className="btn secondary small"
+              onClick={() => setEditing(todo)}
+            >
               {t('todos.edit')}
             </button>
             <button
@@ -258,6 +270,11 @@ export function TodosPage() {
           {t('todos.active')} ({active.length})
         </div>
         {active.length === 0 ? <div className="empty">{t('todos.empty')}</div> : active.map(renderItem)}
+        {active.length > 0 ? (
+          <div className="muted" style={{ fontSize: '0.78rem', marginTop: 8 }}>
+            {t('todos.editHint')}
+          </div>
+        ) : null}
       </div>
 
       {done.length > 0 ? (
@@ -278,6 +295,7 @@ export function TodosPage() {
               <input
                 value={editing.title}
                 onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                autoFocus
               />
             </div>
             <div className="field">
@@ -285,6 +303,7 @@ export function TodosPage() {
               <textarea
                 value={editing.notes || ''}
                 onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+                placeholder={t('todos.notesPlaceholder')}
               />
             </div>
             <div className="row">

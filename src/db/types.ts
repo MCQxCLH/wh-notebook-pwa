@@ -81,6 +81,8 @@ export interface RoomMember {
   id: string
   displayName: string
   updatedAt: string
+  /** Soft-deleted after identity migration (old random userId). */
+  deleted?: boolean
 }
 
 export interface AppSettings {

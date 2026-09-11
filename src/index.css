@@ -219,6 +219,25 @@ button {
   text-decoration: line-through;
   color: var(--muted);
 }
+.todo-title-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+}
+.todo-title-btn:hover .todo-title {
+  color: var(--primary);
+}
+.btn:disabled,
+.chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .check {
   width: 22px;
   height: 22px;
