@@ -378,6 +378,17 @@ export async function startSync(): Promise<void> {
       const unsub = onSnapshot(
         collection(fb.db, 'rooms', roomCode, col.name),
         async (snap) => {
+          // Full reconcile for members: hard-deletes on server won't appear as
+          // "removed" for clients that weren't subscribed; drop local extras.
+          if (col.name === 'members') {
+            const remoteIds = new Set(snap.docs.map((docSnap) => docSnap.id))
+            const localMembers = await db.roomMembers.toArray()
+            for (const m of localMembers) {
+              if (!remoteIds.has(m.id)) {
+                await db.roomMembers.delete(m.id)
+              }
+            }
+          }
           for (const d of snap.docChanges()) {
             if (d.type === 'removed') {
               if (col.name === 'members') {
