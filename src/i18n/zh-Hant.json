@@ -75,7 +75,7 @@
     "groupScope": "成組",
     "personalScope": "自己",
     "settlement": "結算／欠款",
-    "settlementHint": "僅計算共用支出（平分＋自訂）淨額，按貨幣分開",
+    "settlementHint": "共用支出淨額減去已記還款，按貨幣分開",
     "owesYou": "{{name}} 欠你 {{amount}}",
     "youOwe": "你欠 {{name}} {{amount}}",
     "settled": "已結清，互不欠款",
@@ -101,7 +101,18 @@
     "noChartData": "此貨幣尚無紀錄",
     "groupMembers": "房間成員",
     "syncPushFailed": "已存本機，但同步到房間失敗。請確認兩邊加入同一個房間代碼後重試。",
-    "needPartnerMember": "請先登入並與旅伴加入同一個房間，才能選旅伴或分帳。"
+    "needPartnerMember": "請先登入並與旅伴加入同一個房間，才能選旅伴或分帳。",
+    "recordPayment": "記一筆還款",
+    "recordPaymentTitle": "記錄平帳還款",
+    "paymentFrom": "誰付款",
+    "paymentTo": "收款人",
+    "paymentSaved": "已記下還款",
+    "settlementHistory": "還款紀錄",
+    "settlementNote": "例如：現金／轉數快／銀行",
+    "noSettlements": "尚無還款紀錄",
+    "exportCsv": "匯出 CSV",
+    "exportDone": "已下載 CSV",
+    "recentCategories": "最近使用"
   },
   "settings": {
     "title": "設定",
@@ -160,7 +171,15 @@
       "providerDisabled": "尚未啟用電郵登入，請到 Firebase Console 開啟 Email/Password",
       "network": "網路錯誤，請檢查連線",
       "unknown": "登入失敗，請稍後再試"
-    }
+    },
+    "forgotPassword": "忘記密碼",
+    "resetSent": "已寄出重設密碼電郵",
+    "resetNeedEmail": "請先輸入電郵",
+    "removeMember": "移除",
+    "confirmRemoveMember": "確定將 {{name}} 移出此房間？",
+    "memberRemoved": "已移除成員",
+    "exportData": "匯出收支與還款（CSV）",
+    "exportHint": "下載本機的收支與還款 CSV。"
   },
   "common": {
     "loading": "載入中…",
@@ -168,6 +187,21 @@
     "confirmDelete": "確定刪除？",
     "online": "線上",
     "offline": "離線",
-    "synced": "已同步"
+    "synced": "已同步",
+    "local": "本機",
+    "connecting": "連線中…",
+    "retry": "重試"
+  },
+  "onboarding": {
+    "title": "開始使用",
+    "skip": "略過",
+    "next": "下一步",
+    "later": "稍後再設定房間",
+    "step1": "1. 註冊／登入帳戶",
+    "step1Hint": "每部裝置請用同一個電郵，收支才會算成同一人。",
+    "step2": "2. 顯示名稱",
+    "step2Hint": "旅伴在房間裡會看到這個名稱。",
+    "step3": "3. 建立或加入房間",
+    "step3Hint": "把房間代碼分享給旅伴即可即時同步。"
   }
 }

@@ -5,6 +5,7 @@ import type {
   JournalEntry,
   JournalComment,
   MoneyEntry,
+  Settlement,
   AppSettings,
   RoomMember,
 } from './types'
@@ -21,6 +22,7 @@ const defaultSettings = (): AppSettings => ({
   roomCode: null,
   userId: null,
   notificationPermissionAsked: false,
+  onboardingDone: false,
   updatedAt: new Date().toISOString(),
 })
 
@@ -30,6 +32,7 @@ class WhNotebookDB extends Dexie {
   journalEntries!: EntityTable<JournalEntry, 'id'>
   journalComments!: EntityTable<JournalComment, 'id'>
   moneyEntries!: EntityTable<MoneyEntry, 'id'>
+  settlements!: EntityTable<Settlement, 'id'>
   roomMembers!: EntityTable<RoomMember, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
@@ -52,6 +55,16 @@ class WhNotebookDB extends Dexie {
       roomMembers: 'id, updatedAt',
       settings: 'id',
     })
+    this.version(3).stores({
+      todos: 'id, order, completed, updatedAt',
+      reminders: 'id, at, fired, todoId, updatedAt',
+      journalEntries: 'id, date, updatedAt',
+      journalComments: 'id, entryId, createdAt, updatedAt',
+      moneyEntries: 'id, date, type, updatedAt',
+      settlements: 'id, date, currency, updatedAt',
+      roomMembers: 'id, updatedAt',
+      settings: 'id',
+    })
   }
 }
 
@@ -66,6 +79,7 @@ export async function ensureSettings(): Promise<AppSettings> {
       ...existing,
       partnerName: existing.partnerName ?? '',
       userId: existing.userId,
+      onboardingDone: existing.onboardingDone ?? false,
     }
     if (!next.userId) {
       next.userId = uid()
@@ -73,6 +87,11 @@ export async function ensureSettings(): Promise<AppSettings> {
     }
     if (existing.partnerName === undefined) {
       next.partnerName = ''
+      changed = true
+    }
+    if (existing.onboardingDone === undefined) {
+      // Skip onboarding for existing users who already have a room
+      next.onboardingDone = Boolean(existing.roomCode)
       changed = true
     }
     if (changed) {
@@ -84,6 +103,7 @@ export async function ensureSettings(): Promise<AppSettings> {
       ...existing,
       partnerName: existing.partnerName ?? '',
       userId: existing.userId,
+      onboardingDone: existing.onboardingDone ?? Boolean(existing.roomCode),
     } as AppSettings
   }
   const s = defaultSettings()

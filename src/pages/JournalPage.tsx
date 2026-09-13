@@ -43,6 +43,21 @@ export function JournalPage() {
     return map
   }, [comments])
 
+  const groupedByDate = useMemo(() => {
+    const groups: { date: string; items: JournalEntry[] }[] = []
+    const map = new Map<string, JournalEntry[]>()
+    for (const e of entries ?? []) {
+      const list = map.get(e.date) || []
+      list.push(e)
+      map.set(e.date, list)
+    }
+    const dates = [...map.keys()].sort((a, b) => b.localeCompare(a))
+    for (const d of dates) {
+      groups.push({ date: d, items: map.get(d)! })
+    }
+    return groups
+  }, [entries])
+
   async function addEntry() {
     if (!title.trim() && !body.trim()) return
     const now = new Date().toISOString()
@@ -95,72 +110,76 @@ export function JournalPage() {
         </button>
       </div>
 
-      {(entries ?? []).length === 0 ? (
+      {groupedByDate.length === 0 ? (
         <div className="card empty">{t('journal.empty')}</div>
       ) : (
-        (entries ?? []).map((entry) => {
-          const thread = byEntry.get(entry.id) || []
-          const open = expanded === entry.id
-          return (
-            <div key={entry.id} className="card stack">
-              <div className="row between">
-                <div>
-                  <div className="muted">{entry.date}</div>
-                  <strong>{entry.title}</strong>
-                </div>
-                <button
-                  type="button"
-                  className="btn danger small"
-                  onClick={() => void removeEntry(entry)}
-                >
-                  {t('todos.delete')}
-                </button>
-              </div>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{entry.body}</div>
-              <button
-                type="button"
-                className="btn ghost small"
-                onClick={() => setExpanded(open ? null : entry.id)}
-              >
-                {t('journal.comments')} ({thread.length})
-              </button>
-              {open ? (
-                <div className="stack">
-                  {thread.map((c) => (
-                    <div key={c.id} className="comment">
-                      <div className="meta">
-                        {c.author} · {new Date(c.createdAt).toLocaleString()}
-                      </div>
-                      <div>{c.body}</div>
+        groupedByDate.map((group) => (
+          <div key={group.date} className="journal-day-group">
+            <div className="journal-day-header">{group.date}</div>
+            {group.items.map((entry) => {
+              const thread = byEntry.get(entry.id) || []
+              const open = expanded === entry.id
+              return (
+                <div key={entry.id} className="card stack">
+                  <div className="row between">
+                    <div>
+                      <strong>{entry.title}</strong>
                     </div>
-                  ))}
-                  <div className="row">
-                    <input
-                      className="grow"
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: 12,
-                        padding: '10px 12px',
-                      }}
-                      placeholder={t('journal.commentPlaceholder')}
-                      value={commentDrafts[entry.id] || ''}
-                      onChange={(e) =>
-                        setCommentDrafts((d) => ({ ...d, [entry.id]: e.target.value }))
-                      }
-                    />
                     <button
                       type="button"
-                      className="btn secondary"
-                      onClick={() => void addComment(entry.id)}
+                      className="btn danger small"
+                      onClick={() => void removeEntry(entry)}
                     >
-                      {t('journal.addComment')}
+                      {t('todos.delete')}
                     </button>
                   </div>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{entry.body}</div>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => setExpanded(open ? null : entry.id)}
+                  >
+                    {t('journal.comments')} ({thread.length})
+                  </button>
+                  {open ? (
+                    <div className="stack">
+                      {thread.map((c) => (
+                        <div key={c.id} className="comment">
+                          <div className="meta">
+                            {c.author} · {new Date(c.createdAt).toLocaleString()}
+                          </div>
+                          <div>{c.body}</div>
+                        </div>
+                      ))}
+                      <div className="row">
+                        <input
+                          className="grow"
+                          style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: 12,
+                            padding: '10px 12px',
+                          }}
+                          placeholder={t('journal.commentPlaceholder')}
+                          value={commentDrafts[entry.id] || ''}
+                          onChange={(e) =>
+                            setCommentDrafts((d) => ({ ...d, [entry.id]: e.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => void addComment(entry.id)}
+                        >
+                          {t('journal.addComment')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          )
-        })
+              )
+            })}
+          </div>
+        ))
       )}
 
       {showForm ? (

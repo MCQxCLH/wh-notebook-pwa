@@ -12,6 +12,7 @@ import type {
   JournalEntry,
   JournalComment,
   MoneyEntry,
+  Settlement,
   AppSettings,
   RoomMember,
 } from '../db/types'
@@ -112,10 +113,45 @@ export async function pushMoneyEntry(m: MoneyEntry) {
   }
 }
 
+export async function pushSettlement(sDoc: Settlement) {
+  const s = await ensureSettings()
+  if (!s.roomCode || !isFirebaseConfigured()) return
+  try {
+    await pushDoc(s.roomCode, 'settlements', sDoc.id, {
+      ...sDoc,
+    } as unknown as Record<string, unknown>)
+  } catch (err) {
+    console.error('[sync] pushSettlement failed', err)
+    setStatus('error')
+    throw err
+  }
+}
+
 export async function pushRoomMember(m: RoomMember) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
   await pushDoc(s.roomCode, 'members', m.id, { ...m } as unknown as Record<string, unknown>)
+}
+
+/** Soft-delete a room member and push tombstone (or leave for self). */
+export async function removeRoomMember(memberId: string): Promise<void> {
+  const s = await ensureSettings()
+  const now = new Date().toISOString()
+  const existing = await db.roomMembers.get(memberId)
+  const tombstone: RoomMember = {
+    id: memberId,
+    displayName: existing?.displayName || '(removed)',
+    updatedAt: now,
+    deleted: true,
+  }
+  await db.roomMembers.put(tombstone)
+  if (s.roomCode && isFirebaseConfigured()) {
+    await pushDoc(s.roomCode, 'members', memberId, {
+      ...tombstone,
+    } as unknown as Record<string, unknown>)
+  }
+  // Soft-delete locally becomes hard remove for UI (filter !deleted)
+  await db.roomMembers.delete(memberId)
 }
 
 /** Upsert current user into local roomMembers and push to Firestore. */
@@ -223,6 +259,31 @@ export async function migrateLocalMoneyIdentity(
 
   if (updated.length) {
     await db.moneyEntries.bulkPut(updated)
+  }
+
+  // Remap settlements from/to ids
+  const settlements = await db.settlements.toArray()
+  const updatedSettlements: Settlement[] = []
+  for (const s of settlements) {
+    let changed = false
+    const next: Settlement = { ...s }
+    if (aliases.has(next.fromUserId)) {
+      next.fromUserId = authUid
+      if (newDisplayName) next.fromUserName = newDisplayName
+      changed = true
+    }
+    if (aliases.has(next.toUserId)) {
+      next.toUserId = authUid
+      if (newDisplayName) next.toUserName = newDisplayName
+      changed = true
+    }
+    if (changed) {
+      next.updatedAt = now
+      updatedSettlements.push(next)
+    }
+  }
+  if (updatedSettlements.length) {
+    await db.settlements.bulkPut(updatedSettlements)
   }
 
   // Soft-delete old room member doc (not auth uid)
@@ -358,6 +419,16 @@ export async function startSync(): Promise<void> {
         },
       },
       {
+        name: 'settlements',
+        apply: async (data) => {
+          await mergeCollection(
+            (id) => db.settlements.get(id),
+            (item) => db.settlements.put(item),
+            data as unknown as Settlement,
+          )
+        },
+      },
+      {
         name: 'members',
         apply: async (data) => {
           const member = data as unknown as RoomMember
@@ -454,12 +525,13 @@ export async function pushAllLocal(): Promise<void> {
   if (!s.roomCode || !isFirebaseConfigured()) return
   const user = await ensureSignedInUser()
   if (!user) return
-  const [todos, reminders, entries, comments, money, members] = await Promise.all([
+  const [todos, reminders, entries, comments, money, settlements, members] = await Promise.all([
     db.todos.toArray(),
     db.reminders.toArray(),
     db.journalEntries.toArray(),
     db.journalComments.toArray(),
     db.moneyEntries.toArray(),
+    db.settlements.toArray(),
     db.roomMembers.toArray(),
   ])
   await Promise.all([
@@ -468,8 +540,15 @@ export async function pushAllLocal(): Promise<void> {
     ...entries.map((e) => pushJournalEntry(e)),
     ...comments.map((c) => pushJournalComment(c)),
     ...money.map((m) => pushMoneyEntry(m)),
+    ...settlements.map((x) => pushSettlement(x)),
     ...members.filter((m) => !m.deleted).map((m) => pushRoomMember(m)),
     pushSettingsPartial(s),
   ])
   await upsertSelfRoomMember()
+}
+
+/** Retry sync after error: restart listeners and push local. */
+export async function retrySync(): Promise<void> {
+  await startSync()
+  await pushAllLocal()
 }

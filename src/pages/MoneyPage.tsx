@@ -6,7 +6,7 @@ import {
   startOfWeek,
 } from 'date-fns'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
@@ -18,12 +18,19 @@ import {
   YAxis,
 } from 'recharts'
 import { db, ensureSettings } from '../db/database'
-import type { EntryCurrency, MoneyEntry, MoneyType, SplitMode } from '../db/types'
+import type {
+  EntryCurrency,
+  MoneyEntry,
+  MoneyType,
+  Settlement,
+  SplitMode,
+} from '../db/types'
 import { uid } from '../utils/id'
 import {
   effectiveSplitMode,
   entryCurrency,
   filterByCurrency,
+  filterSettlementsByCurrency,
   groupExpense,
   groupIncome,
   groupScopeTotals,
@@ -34,13 +41,33 @@ import {
   sharesForEntry,
 } from '../utils/moneySplits'
 import { RoomMembersList } from '../components/RoomMembersList'
-import { pushMoneyEntry } from '../sync/syncService'
+import { pushMoneyEntry, pushSettlement } from '../sync/syncService'
+import { downloadMoneyCsv } from '../utils/exportCsv'
 
 const INCOME_CATS = ['salary', 'gift', 'other'] as const
 const EXPENSE_CATS = ['food', 'rent', 'transport', 'fun', 'shopping', 'other'] as const
 const CURRENCIES: EntryCurrency[] = ['HKD', 'AUD']
+const LAST_CURRENCY_KEY = 'wh-last-currency'
 
 type FormSplit = 'personal' | 'equal' | 'custom'
+
+function readLastCurrency(fallback: EntryCurrency): EntryCurrency {
+  try {
+    const v = localStorage.getItem(LAST_CURRENCY_KEY)?.toUpperCase()
+    if (v === 'AUD' || v === 'HKD') return v
+  } catch {
+    /* ignore */
+  }
+  return fallback
+}
+
+function rememberCurrency(c: EntryCurrency) {
+  try {
+    localStorage.setItem(LAST_CURRENCY_KEY, c)
+  } catch {
+    /* ignore */
+  }
+}
 
 export function MoneyPage() {
   const { t } = useTranslation()
@@ -55,12 +82,23 @@ export function MoneyPage() {
         ),
     [],
   )
+  const settlements = useLiveQuery(
+    () =>
+      db.settlements
+        .filter((x) => !x.deleted)
+        .toArray()
+        .then((arr) =>
+          arr.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
+        ),
+    [],
+  )
   const members = useLiveQuery(
     () => db.roomMembers.filter((m) => !m.deleted).toArray(),
     [],
   )
 
   const [showForm, setShowForm] = useState(false)
+  const [showSettleForm, setShowSettleForm] = useState(false)
   const [type, setType] = useState<MoneyType>('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState<string>('food')
@@ -73,13 +111,30 @@ export function MoneyPage() {
   const [partnerShareInput, setPartnerShareInput] = useState('')
   const [chartCurrency, setChartCurrency] = useState<EntryCurrency>('HKD')
 
+  // Settlement form
+  const [settleAmount, setSettleAmount] = useState('')
+  const [settleCurrency, setSettleCurrency] = useState<EntryCurrency>('HKD')
+  const [settleFrom, setSettleFrom] = useState<'me' | 'partner'>('me')
+  const [settleDate, setSettleDate] = useState(new Date().toISOString().slice(0, 10))
+  const [settleNote, setSettleNote] = useState('')
+
   const defaultCurrency: EntryCurrency =
     (settings?.currency || 'HKD').toUpperCase() === 'AUD' ? 'AUD' : 'HKD'
   const meId = settings?.userId || ''
   const meName = settings?.displayName || 'Traveler'
   const partnerName = settings?.partnerName?.trim() || t('money.partner')
   const list = entries ?? []
+  const settleList = settlements ?? []
   const memberList = members ?? []
+
+  useEffect(() => {
+    if (settings) {
+      const last = readLastCurrency(defaultCurrency)
+      setFormCurrency(last)
+      setSettleCurrency(last)
+      setChartCurrency(last)
+    }
+  }, [settings?.currency])
 
   const partnerMember = useMemo(() => {
     if (!meId) return undefined
@@ -89,6 +144,16 @@ export function MoneyPage() {
   const partnerId = partnerMember?.id || null
   const partnerLabel = partnerMember?.displayName || partnerName
 
+  const recentCategories = useMemo(() => {
+    const seen: string[] = []
+    for (const e of list) {
+      if (e.type !== type) continue
+      if (!seen.includes(e.category)) seen.push(e.category)
+      if (seen.length >= 4) break
+    }
+    return seen
+  }, [list, type])
+
   function slice(currency: EntryCurrency) {
     return filterByCurrency(list, currency, defaultCurrency)
   }
@@ -96,6 +161,7 @@ export function MoneyPage() {
   const dualTotals = useMemo(() => {
     const build = (currency: EntryCurrency) => {
       const ranged = filterByCurrency(list, currency, defaultCurrency)
+      const settles = filterSettlementsByCurrency(settleList, currency, defaultCurrency)
       const g = groupScopeTotals(ranged)
       const pIncome = meId ? personalIncome(ranged, meId) : g.income
       const pExpense = meId ? personalExpense(ranged, meId) : g.expense
@@ -106,11 +172,11 @@ export function MoneyPage() {
           expense: pExpense,
           balance: Math.round((pIncome - pExpense) * 100) / 100,
         },
-        settlement: meId ? netBalance(ranged, meId, partnerId) : 0,
+        settlement: meId ? netBalance(ranged, meId, partnerId, settles) : 0,
       }
     }
     return { HKD: build('HKD'), AUD: build('AUD') }
-  }, [list, meId, partnerId, defaultCurrency])
+  }, [list, settleList, meId, partnerId, defaultCurrency])
 
   const weekMonth = useMemo(() => {
     const now = new Date()
@@ -168,10 +234,19 @@ export function MoneyPage() {
     setAmount('')
     setNote('')
     setDate(new Date().toISOString().slice(0, 10))
-    setFormCurrency(defaultCurrency)
+    setFormCurrency(readLastCurrency(defaultCurrency))
     setMyShareInput('')
     setPartnerShareInput('')
     setShowForm(true)
+  }
+
+  function openSettleForm(preferCurrency?: EntryCurrency) {
+    setSettleAmount('')
+    setSettleCurrency(preferCurrency || readLastCurrency(defaultCurrency))
+    setSettleFrom('me')
+    setSettleDate(new Date().toISOString().slice(0, 10))
+    setSettleNote('')
+    setShowSettleForm(true)
   }
 
   function onAmountChange(raw: string) {
@@ -223,7 +298,6 @@ export function MoneyPage() {
     if (!Number.isFinite(n) || n <= 0 || !settings?.userId) return
     const now = new Date().toISOString()
     const payerIsMe = paidBy === 'me'
-    // Prefer real room-member auth uid; never invent a new random id
     const pidPartner = partnerId || null
     if ((splitMode === 'equal' || splitMode === 'custom' || paidBy === 'partner') && !pidPartner) {
       alert(t('money.needPartnerMember'))
@@ -279,6 +353,7 @@ export function MoneyPage() {
       participantNames,
       shares,
     }
+    rememberCurrency(formCurrency)
     await db.moneyEntries.put(entry)
     try {
       await pushMoneyEntry(entry)
@@ -292,11 +367,57 @@ export function MoneyPage() {
     setShowForm(false)
   }
 
+  async function saveSettlement() {
+    const n = Number(settleAmount)
+    if (!Number.isFinite(n) || n <= 0 || !settings?.userId || !partnerId) {
+      alert(t('money.needPartnerMember'))
+      return
+    }
+    const now = new Date().toISOString()
+    const fromIsMe = settleFrom === 'me'
+    const fromUserId = fromIsMe ? settings.userId : partnerId
+    const toUserId = fromIsMe ? partnerId : settings.userId
+    const fromUserName = fromIsMe ? meName : partnerLabel
+    const toUserName = fromIsMe ? partnerLabel : meName
+    const sDoc: Settlement = {
+      id: uid(),
+      amount: Math.round(n * 100) / 100,
+      currency: settleCurrency,
+      fromUserId,
+      toUserId,
+      fromUserName,
+      toUserName,
+      date: settleDate,
+      note: settleNote.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    }
+    rememberCurrency(settleCurrency)
+    await db.settlements.put(sDoc)
+    try {
+      await pushSettlement(sDoc)
+    } catch {
+      alert(t('money.syncPushFailed'))
+    }
+    setShowSettleForm(false)
+  }
+
   async function remove(entry: MoneyEntry) {
     if (!confirm(t('common.confirmDelete'))) return
     const next = { ...entry, deleted: true, updatedAt: new Date().toISOString() }
     await db.moneyEntries.put(next)
     await pushMoneyEntry(next)
+  }
+
+  async function removeSettlement(s: Settlement) {
+    if (!confirm(t('common.confirmDelete'))) return
+    const next = { ...s, deleted: true, updatedAt: new Date().toISOString() }
+    await db.settlements.put(next)
+    await pushSettlement(next)
+  }
+
+  function doExport() {
+    downloadMoneyCsv(list, settleList, defaultCurrency)
   }
 
   const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS
@@ -474,9 +595,14 @@ export function MoneyPage() {
       <div className="card stack">
         <div className="row between">
           <h2 style={{ margin: 0 }}>{t('money.title')}</h2>
-          <button type="button" className="btn" onClick={() => openForm('expense')}>
-            {t('money.add')}
-          </button>
+          <div className="row">
+            <button type="button" className="btn secondary small" onClick={doExport}>
+              {t('money.exportCsv')}
+            </button>
+            <button type="button" className="btn" onClick={() => openForm('expense')}>
+              {t('money.add')}
+            </button>
+          </div>
         </div>
         <div className="muted" style={{ fontSize: '0.78rem' }}>
           {t('money.dualCurrencyHint')}
@@ -499,13 +625,68 @@ export function MoneyPage() {
       </div>
 
       <div className="card stack settlement-card">
-        <strong>{t('money.settlement')}</strong>
+        <div className="row between">
+          <strong>{t('money.settlement')}</strong>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!partnerId}
+            onClick={() => openSettleForm()}
+          >
+            {t('money.recordPayment')}
+          </button>
+        </div>
         <div className="muted" style={{ fontSize: '0.78rem' }}>
           {t('money.settlementHint')}
         </div>
         {CURRENCIES.map((c) => (
           <SettlementBlock key={c} currency={c} />
         ))}
+        {!partnerId ? (
+          <div className="muted" style={{ fontSize: '0.78rem' }}>
+            {t('money.needPartnerMember')}
+          </div>
+        ) : null}
+
+        {settleList.length > 0 ? (
+          <div className="stack" style={{ marginTop: 8 }}>
+            <div className="scope-heading">{t('money.settlementHistory')}</div>
+            {settleList.map((s) => {
+              const cur = entryCurrency(s, defaultCurrency)
+              return (
+                <div key={s.id} className="money-item">
+                  <div>
+                    <div>
+                      <strong>
+                        {s.fromUserName || (s.fromUserId === meId ? meName : partnerLabel)}
+                        {' → '}
+                        {s.toUserName || (s.toUserId === meId ? meName : partnerLabel)}
+                      </strong>
+                      <span className="tag currency-tag">{cur}</span>
+                      <span className="tag shared">{t('money.settlement')}</span>
+                    </div>
+                    <div className="muted">
+                      {s.date}
+                      {s.note ? ` · ${s.note}` : ''}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn danger small"
+                      onClick={() => void removeSettlement(s)}
+                    >
+                      {t('todos.delete')}
+                    </button>
+                  </div>
+                  <div className="amount income">{fmt(s.amount, cur)}</div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: '0.78rem' }}>
+            {t('money.noSettlements')}
+          </div>
+        )}
       </div>
 
       {settings?.roomCode ? (
@@ -735,6 +916,23 @@ export function MoneyPage() {
 
             <div className="field">
               <label>{t('money.category')}</label>
+              {recentCategories.length > 0 ? (
+                <div className="chip-row" style={{ marginBottom: 6 }}>
+                  <span className="muted" style={{ fontSize: '0.75rem' }}>
+                    {t('money.recentCategories')}:
+                  </span>
+                  {recentCategories.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`chip${category === c ? ' active' : ''}`}
+                      onClick={() => setCategory(c)}
+                    >
+                      {t(`money.categories.${c}`, c)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
                 {cats.map((c) => (
                   <option key={c} value={c}>
@@ -762,7 +960,91 @@ export function MoneyPage() {
           </div>
         </div>
       ) : null}
+
+      {showSettleForm ? (
+        <div className="modal-backdrop" onClick={() => setShowSettleForm(false)}>
+          <div className="modal stack" onClick={(e) => e.stopPropagation()}>
+            <h2>{t('money.recordPaymentTitle')}</h2>
+            <div className="field">
+              <label>{t('money.entryCurrency')}</label>
+              <div className="chip-row">
+                {CURRENCIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`chip${settleCurrency === c ? ' active' : ''}`}
+                    onClick={() => setSettleCurrency(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label>{t('money.paymentFrom')}</label>
+              <div className="chip-row">
+                <button
+                  type="button"
+                  className={`chip${settleFrom === 'me' ? ' active' : ''}`}
+                  onClick={() => setSettleFrom('me')}
+                >
+                  {t('money.me')} ({meName})
+                </button>
+                <button
+                  type="button"
+                  className={`chip${settleFrom === 'partner' ? ' active' : ''}`}
+                  onClick={() => setSettleFrom('partner')}
+                >
+                  {t('money.partner')} ({partnerLabel})
+                </button>
+              </div>
+            </div>
+            <div className="muted" style={{ fontSize: '0.85rem' }}>
+              {t('money.paymentTo')}:{' '}
+              <strong>
+                {settleFrom === 'me' ? partnerLabel : meName}
+              </strong>
+            </div>
+            <div className="field">
+              <label>{t('money.amount')}</label>
+              <input
+                inputMode="decimal"
+                value={settleAmount}
+                onChange={(e) => setSettleAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="field">
+              <label>{t('money.date')}</label>
+              <input
+                type="date"
+                value={settleDate}
+                onChange={(e) => setSettleDate(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>{t('money.note')}</label>
+              <input
+                value={settleNote}
+                onChange={(e) => setSettleNote(e.target.value)}
+                placeholder={t('money.settlementNote')}
+              />
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                className="btn secondary grow"
+                onClick={() => setShowSettleForm(false)}
+              >
+                {t('todos.cancel')}
+              </button>
+              <button type="button" className="btn grow" onClick={() => void saveSettlement()}>
+                {t('todos.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }
-

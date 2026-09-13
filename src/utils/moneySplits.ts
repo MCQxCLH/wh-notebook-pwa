@@ -1,10 +1,10 @@
-import type { EntryCurrency, MoneyEntry } from '../db/types'
+import type { EntryCurrency, MoneyEntry, Settlement } from '../db/types'
 
 export type EffectiveSplit = 'personal' | 'equal' | 'custom'
 
 /** Resolve entry currency; legacy missing → fallback (settings default or HKD). */
 export function entryCurrency(
-  entry: MoneyEntry,
+  entry: MoneyEntry | Settlement,
   fallback: string = 'HKD',
 ): EntryCurrency {
   const c = (entry.currency || fallback || 'HKD').toUpperCase()
@@ -17,6 +17,14 @@ export function filterByCurrency(
   fallback: string = 'HKD',
 ): MoneyEntry[] {
   return entries.filter((e) => entryCurrency(e, fallback) === currency)
+}
+
+export function filterSettlementsByCurrency(
+  settlements: Settlement[],
+  currency: EntryCurrency,
+  fallback: string = 'HKD',
+): Settlement[] {
+  return settlements.filter((s) => entryCurrency(s, fallback) === currency)
 }
 
 /**
@@ -125,10 +133,10 @@ export function groupAmount(entry: MoneyEntry): number {
 }
 
 /**
- * Net balance from shared (equal + custom) expenses only, for one currency slice.
+ * Net from shared expenses only (before settlements).
  * Positive ⇒ partner owes me; negative ⇒ I owe partner.
  */
-export function netBalance(
+export function netFromSharedExpenses(
   entries: MoneyEntry[],
   meId: string,
   partnerId: string | null | undefined,
@@ -165,6 +173,39 @@ export function netBalance(
     }
   }
   return Math.round(net * 100) / 100
+}
+
+/**
+ * Apply settlement payments to a net balance.
+ * I paid them → net += amount (my debt shrinks).
+ * They paid me → net -= amount (their debt shrinks).
+ */
+export function applySettlementsToNet(
+  net: number,
+  settlements: Settlement[],
+  meId: string,
+): number {
+  let result = net
+  for (const s of settlements) {
+    if (s.deleted) continue
+    if (s.fromUserId === meId) result += s.amount
+    else if (s.toUserId === meId) result -= s.amount
+  }
+  return Math.round(result * 100) / 100
+}
+
+/**
+ * Net balance from shared expenses minus settlement payments, for one currency slice.
+ * Positive ⇒ partner owes me; negative ⇒ I owe partner.
+ */
+export function netBalance(
+  entries: MoneyEntry[],
+  meId: string,
+  partnerId: string | null | undefined,
+  settlements: Settlement[] = [],
+): number {
+  const fromExpenses = netFromSharedExpenses(entries, meId, partnerId)
+  return applySettlementsToNet(fromExpenses, settlements, meId)
 }
 
 export function personalIncome(entries: MoneyEntry[], userId: string): number {

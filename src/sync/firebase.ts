@@ -3,6 +3,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
@@ -128,6 +129,12 @@ export async function signInWithEmail(email: string, password: string): Promise<
   if (!fb) throw new Error('Firebase not configured')
   const cred = await signInWithEmailAndPassword(fb.auth, email.trim(), password)
   return cred.user
+}
+
+export async function resetPassword(email: string): Promise<void> {
+  const fb = getFirebase()
+  if (!fb) throw new Error('Firebase not configured')
+  await sendPasswordResetEmail(fb.auth, email.trim())
 }
 
 export async function signOutUser(): Promise<void> {

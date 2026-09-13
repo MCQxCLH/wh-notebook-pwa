@@ -448,3 +448,116 @@ button {
   align-items: center;
   flex-wrap: wrap;
 }
+
+/* Sync status header */
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.sync-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.sync-room {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: var(--primary-soft);
+  color: var(--primary);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.sync-account {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge.connecting {
+  background: #fff6e0;
+  color: #9a6b1a;
+}
+
+/* Onboarding */
+.onboarding-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(20, 28, 38, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+}
+.onboarding-card {
+  width: min(560px, 100%);
+  max-height: 92dvh;
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 18px 18px 0 0;
+  padding: 18px 16px calc(18px + var(--safe-bottom));
+  box-shadow: var(--shadow);
+}
+.onboarding-steps {
+  display: flex;
+  gap: 8px;
+}
+.onboarding-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.onboarding-dot.active {
+  background: var(--primary);
+  color: white;
+}
+.onboarding-dot.done {
+  background: #e5f6ee;
+  color: var(--success);
+}
+@media (min-width: 640px) {
+  .onboarding-backdrop { align-items: center; }
+  .onboarding-card {
+    border-radius: 18px;
+    margin: 16px;
+    padding-bottom: 18px;
+  }
+}
+
+/* Journal sticky day headers */
+.journal-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.journal-day-header {
+  position: sticky;
+  top: 52px;
+  z-index: 10;
+  background: rgba(247, 245, 242, 0.92);
+  backdrop-filter: blur(8px);
+  padding: 6px 10px;
+  margin: 0 -2px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+}

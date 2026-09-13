@@ -77,6 +77,26 @@ export interface MoneyEntry {
   shares?: Record<string, number>
 }
 
+/**
+ * Settlement payment between travelers (e.g. A paid B 200 HKD).
+ * Synced via Firestore rooms/{code}/settlements.
+ * Reduces net balance from shared expenses.
+ */
+export interface Settlement {
+  id: string
+  amount: number
+  currency: EntryCurrency | string
+  fromUserId: string
+  toUserId: string
+  fromUserName?: string
+  toUserName?: string
+  date: string // YYYY-MM-DD
+  note?: string
+  createdAt: string
+  updatedAt: string
+  deleted?: boolean
+}
+
 export interface RoomMember {
   id: string
   displayName: string
@@ -97,6 +117,8 @@ export interface AppSettings {
   roomCode: string | null
   userId: string | null
   notificationPermissionAsked: boolean
+  /** First-run onboarding dismissed / completed. */
+  onboardingDone?: boolean
   updatedAt: string
 }
 
@@ -106,5 +128,6 @@ export type SyncCollection =
   | 'journalEntries'
   | 'journalComments'
   | 'moneyEntries'
+  | 'settlements'
   | 'roomMembers'
   | 'settings'

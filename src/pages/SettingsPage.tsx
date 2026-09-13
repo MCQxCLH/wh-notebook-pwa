@@ -9,6 +9,7 @@ import {
   getCurrentEmailUser,
   isFirebaseConfigured,
   registerWithEmail,
+  resetPassword,
   signInWithEmail,
   signOutUser,
   subscribeAuth,
@@ -23,6 +24,7 @@ import {
 } from '../sync/syncService'
 import { generateRoomCode, normalizeRoomCode } from '../utils/roomCode'
 import { RoomMembersList } from '../components/RoomMembersList'
+import { downloadMoneyCsv } from '../utils/exportCsv'
 import i18n from '../i18n'
 
 const PRESET_CURRENCIES = ['HKD', 'AUD'] as const
@@ -199,6 +201,28 @@ export function SettingsPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    const target = (signedIn && authUser?.email) || email.trim()
+    if (!target) {
+      setAuthMsg(t('settings.resetNeedEmail'))
+      return
+    }
+    if (!firebaseOk) {
+      setAuthMsg(t('settings.firebaseMissing'))
+      return
+    }
+    setAuthBusy(true)
+    setAuthMsg('')
+    try {
+      await resetPassword(target)
+      setAuthMsg(t('settings.resetSent'))
+    } catch (err) {
+      setAuthMsg(mapAuthError(err))
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
   async function handleSignOut() {
     setAuthBusy(true)
     setAuthMsg('')
@@ -230,6 +254,7 @@ export function SettingsPage() {
       partnerName: partnerName.trim(),
       roomCode: code,
       userId: authUser!.uid,
+      onboardingDone: true,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
@@ -257,6 +282,7 @@ export function SettingsPage() {
       partnerName: partnerName.trim(),
       roomCode: code,
       userId: authUser!.uid,
+      onboardingDone: true,
       updatedAt: new Date().toISOString(),
     }
     await db.settings.put(next)
@@ -287,6 +313,15 @@ export function SettingsPage() {
     } catch {
       // ignore
     }
+  }
+
+  async function exportData() {
+    const [money, settlements] = await Promise.all([
+      db.moneyEntries.filter((x) => !x.deleted).toArray(),
+      db.settlements.filter((x) => !x.deleted).toArray(),
+    ])
+    downloadMoneyCsv(money, settlements, settings?.currency || 'HKD')
+    setMsg(t('money.exportDone'))
   }
 
   const permLabel =
@@ -402,14 +437,24 @@ export function SettingsPage() {
               <label>{t('settings.displayName')}</label>
               <div>{authUser.displayName || displayName || '—'}</div>
             </div>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={authBusy}
-              onClick={() => void handleSignOut()}
-            >
-              {t('settings.signOut')}
-            </button>
+            <div className="row">
+              <button
+                type="button"
+                className="btn secondary grow"
+                disabled={authBusy}
+                onClick={() => void handleForgotPassword()}
+              >
+                {t('settings.forgotPassword')}
+              </button>
+              <button
+                type="button"
+                className="btn secondary grow"
+                disabled={authBusy}
+                onClick={() => void handleSignOut()}
+              >
+                {t('settings.signOut')}
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -451,6 +496,14 @@ export function SettingsPage() {
                 {t('settings.signIn')}
               </button>
             </div>
+            <button
+              type="button"
+              className="btn ghost small"
+              disabled={authBusy || !firebaseOk}
+              onClick={() => void handleForgotPassword()}
+            >
+              {t('settings.forgotPassword')}
+            </button>
           </>
         )}
         {authMsg ? <div className="muted">{authMsg}</div> : null}
@@ -490,7 +543,12 @@ export function SettingsPage() {
                 {copied ? t('settings.copied') : t('settings.copyCode')}
               </button>
             </div>
-            <RoomMembersList members={members ?? []} meId={settings.userId} />
+            <RoomMembersList
+              members={members ?? []}
+              meId={settings.userId}
+              allowRemove
+              onRemoved={() => setMsg(t('settings.memberRemoved'))}
+            />
             <button type="button" className="btn danger" onClick={() => void leaveRoom()}>
               {t('settings.leaveRoom')}
             </button>
@@ -530,6 +588,16 @@ export function SettingsPage() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="card stack">
+        <strong>{t('settings.exportData')}</strong>
+        <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+          {t('settings.exportHint')}
+        </p>
+        <button type="button" className="btn secondary" onClick={() => void exportData()}>
+          {t('money.exportCsv')}
+        </button>
       </div>
 
       <div className="card stack">

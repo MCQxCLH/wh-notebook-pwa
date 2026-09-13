@@ -75,7 +75,7 @@
     "groupScope": "Group",
     "personalScope": "Personal",
     "settlement": "Settlement",
-    "settlementHint": "Net from shared expenses only (equal + custom), per currency",
+    "settlementHint": "Net from shared expenses minus recorded repayments, per currency",
     "owesYou": "{{name}} owes you {{amount}}",
     "youOwe": "You owe {{name}} {{amount}}",
     "settled": "Settled — no one owes",
@@ -101,7 +101,18 @@
     "noChartData": "No entries in this currency yet",
     "groupMembers": "Room members",
     "syncPushFailed": "Saved on this device, but sync to the room failed. Check you both joined the same room code, then try again.",
-    "needPartnerMember": "Sign in and join the same room as your partner before choosing them or splitting."
+    "needPartnerMember": "Sign in and join the same room as your partner before choosing them or splitting.",
+    "recordPayment": "Record payment",
+    "recordPaymentTitle": "Record a settlement payment",
+    "paymentFrom": "Who paid",
+    "paymentTo": "Paid to",
+    "paymentSaved": "Payment recorded",
+    "settlementHistory": "Settlement history",
+    "settlementNote": "e.g. cash / FPS / bank",
+    "noSettlements": "No repayments recorded yet",
+    "exportCsv": "Export CSV",
+    "exportDone": "CSV downloaded",
+    "recentCategories": "Recent"
   },
   "settings": {
     "title": "Settings",
@@ -160,7 +171,15 @@
       "providerDisabled": "Email/Password is not enabled in Firebase Console",
       "network": "Network error — check your connection",
       "unknown": "Sign-in failed — try again"
-    }
+    },
+    "forgotPassword": "Forgot password",
+    "resetSent": "Password reset email sent",
+    "resetNeedEmail": "Enter your email first",
+    "removeMember": "Remove",
+    "confirmRemoveMember": "Remove {{name}} from this room?",
+    "memberRemoved": "Member removed",
+    "exportData": "Export money & settlements (CSV)",
+    "exportHint": "Downloads a CSV of money entries and settlements from this device."
   },
   "common": {
     "loading": "Loading…",
@@ -168,6 +187,21 @@
     "confirmDelete": "Delete?",
     "online": "Online",
     "offline": "Offline",
-    "synced": "Synced"
+    "synced": "Synced",
+    "local": "Local",
+    "connecting": "Connecting…",
+    "retry": "Retry"
+  },
+  "onboarding": {
+    "title": "Welcome",
+    "skip": "Skip",
+    "next": "Next",
+    "later": "Set up room later",
+    "step1": "1. Create account / Sign in",
+    "step1Hint": "Use the same email on every device so money identity stays consistent.",
+    "step2": "2. Display name",
+    "step2Hint": "Shown to your travel partner in the room.",
+    "step3": "3. Create or join a room",
+    "step3Hint": "Share the room code with your partner for real-time sync."
   }
 }
