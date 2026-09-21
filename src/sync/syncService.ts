@@ -143,6 +143,7 @@ export async function removeRoomMember(memberId: string): Promise<void> {
     displayName: existing?.displayName || '(removed)',
     updatedAt: now,
     deleted: true,
+    ...(existing?.email ? { email: existing.email } : {}),
   }
   await db.roomMembers.put(tombstone)
   if (s.roomCode && isFirebaseConfigured()) {
@@ -158,10 +159,17 @@ export async function removeRoomMember(memberId: string): Promise<void> {
 export async function upsertSelfRoomMember(): Promise<RoomMember | null> {
   const s = await ensureSettings()
   if (!s.userId) return null
+  const authUser = await ensureSignedInUser()
+  const existing = await db.roomMembers.get(s.userId)
+  const email =
+    authUser?.email?.trim() ||
+    existing?.email ||
+    undefined
   const member: RoomMember = {
     id: s.userId,
     displayName: s.displayName || 'Traveler',
     updatedAt: new Date().toISOString(),
+    ...(email ? { email } : {}),
   }
   await db.roomMembers.put(member)
   await pushRoomMember(member)
@@ -340,6 +348,7 @@ export async function applyAuthenticatedUser(user: User): Promise<void> {
       id: user.uid,
       displayName: preferredName,
       updatedAt: new Date().toISOString(),
+      ...(user.email ? { email: user.email } : {}),
     })
     if (oldUserId && oldUserId !== user.uid) {
       await db.roomMembers.delete(oldUserId)

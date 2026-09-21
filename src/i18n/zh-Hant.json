@@ -112,7 +112,12 @@
     "noSettlements": "尚無還款紀錄",
     "exportCsv": "匯出 CSV",
     "exportDone": "已下載 CSV",
-    "recentCategories": "最近使用"
+    "recentCategories": "最近使用",
+    "edit": "編輯",
+    "editEntry": "編輯紀錄",
+    "pickPartner": "選擇旅伴",
+    "pickPartnerHint": "房間裡有多位成員——請選擇要結算的對象。",
+    "sameEmailHint": "每部裝置請用同一個電郵登入，才會算成同一人。"
   },
   "settings": {
     "title": "設定",
@@ -179,7 +184,8 @@
     "confirmRemoveMember": "確定將 {{name}} 移出此房間？",
     "memberRemoved": "已移除成員",
     "exportData": "匯出收支與還款（CSV）",
-    "exportHint": "下載本機的收支與還款 CSV。"
+    "exportHint": "下載本機的收支與還款 CSV。",
+    "duplicateNamesHint": "房間內有重複顯示名稱：{{names}}。可在下方移除幽靈成員，並在每部裝置用同一個電郵。"
   },
   "common": {
     "loading": "載入中…",

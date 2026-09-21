@@ -103,6 +103,8 @@ export interface RoomMember {
   updatedAt: string
   /** Soft-deleted after identity migration (old random userId). */
   deleted?: boolean
+  /** Firebase Auth email when known — helps distinguish same-name members. */
+  email?: string
 }
 
 export interface AppSettings {

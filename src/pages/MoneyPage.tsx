@@ -27,6 +27,13 @@ import type {
 } from '../db/types'
 import { uid } from '../utils/id'
 import {
+  buildAliasSets,
+  idsEquivalent,
+  memberLabel,
+  resolvePartnerMember,
+  shareAmountFromMap,
+} from '../utils/identity'
+import {
   effectiveSplitMode,
   entryCurrency,
   filterByCurrency,
@@ -98,6 +105,8 @@ export function MoneyPage() {
   )
 
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingCreatedAt, setEditingCreatedAt] = useState<string | null>(null)
   const [showSettleForm, setShowSettleForm] = useState(false)
   const [type, setType] = useState<MoneyType>('expense')
   const [amount, setAmount] = useState('')
@@ -110,6 +119,7 @@ export function MoneyPage() {
   const [myShareInput, setMyShareInput] = useState('')
   const [partnerShareInput, setPartnerShareInput] = useState('')
   const [chartCurrency, setChartCurrency] = useState<EntryCurrency>('HKD')
+  const [preferredPartnerId, setPreferredPartnerId] = useState<string | null>(null)
 
   // Settlement form
   const [settleAmount, setSettleAmount] = useState('')
@@ -127,6 +137,16 @@ export function MoneyPage() {
   const settleList = settlements ?? []
   const memberList = members ?? []
 
+  const aliasMap = useMemo(
+    () => buildAliasSets({ members: memberList, entries: list }),
+    [memberList, list],
+  )
+
+  const idOpts = useMemo(
+    () => ({ aliasMap, members: memberList, entries: list }),
+    [aliasMap, memberList, list],
+  )
+
   useEffect(() => {
     if (settings) {
       const last = readLastCurrency(defaultCurrency)
@@ -136,13 +156,39 @@ export function MoneyPage() {
     }
   }, [settings?.currency])
 
-  const partnerMember = useMemo(() => {
-    if (!meId) return undefined
-    return memberList.find((m) => m.id !== meId)
-  }, [memberList, meId])
+  const partnerResolution = useMemo(() => {
+    if (!meId) {
+      return { partner: null, candidates: [] as typeof memberList, ambiguous: false }
+    }
+    return resolvePartnerMember(memberList, meId, {
+      partnerName: settings?.partnerName,
+      entries: list,
+      settlements: settleList,
+      aliasMap,
+      preferredPartnerId,
+    })
+  }, [
+    memberList,
+    meId,
+    settings?.partnerName,
+    list,
+    settleList,
+    aliasMap,
+    preferredPartnerId,
+  ])
 
+  const partnerMember = partnerResolution.partner
   const partnerId = partnerMember?.id || null
-  const partnerLabel = partnerMember?.displayName || partnerName
+  const partnerLabel = partnerMember
+    ? memberLabel(partnerMember, {
+        showEmail:
+          partnerResolution.candidates.filter(
+            (c) =>
+              c.displayName.trim().toLowerCase() ===
+              partnerMember.displayName.trim().toLowerCase(),
+          ).length > 1,
+      })
+    : partnerName
 
   const recentCategories = useMemo(() => {
     const seen: string[] = []
@@ -163,8 +209,8 @@ export function MoneyPage() {
       const ranged = filterByCurrency(list, currency, defaultCurrency)
       const settles = filterSettlementsByCurrency(settleList, currency, defaultCurrency)
       const g = groupScopeTotals(ranged)
-      const pIncome = meId ? personalIncome(ranged, meId) : g.income
-      const pExpense = meId ? personalExpense(ranged, meId) : g.expense
+      const pIncome = meId ? personalIncome(ranged, meId, idOpts) : g.income
+      const pExpense = meId ? personalExpense(ranged, meId, idOpts) : g.expense
       return {
         group: g,
         personal: {
@@ -172,11 +218,11 @@ export function MoneyPage() {
           expense: pExpense,
           balance: Math.round((pIncome - pExpense) * 100) / 100,
         },
-        settlement: meId ? netBalance(ranged, meId, partnerId, settles) : 0,
+        settlement: meId ? netBalance(ranged, meId, partnerId, settles, idOpts) : 0,
       }
     }
     return { HKD: build('HKD'), AUD: build('AUD') }
-  }, [list, settleList, meId, partnerId, defaultCurrency])
+  }, [list, settleList, meId, partnerId, defaultCurrency, idOpts])
 
   const weekMonth = useMemo(() => {
     const now = new Date()
@@ -198,8 +244,8 @@ export function MoneyPage() {
           expense: groupExpense(ranged),
         },
         personal: {
-          income: meId ? personalIncome(ranged, meId) : groupIncome(ranged),
-          expense: meId ? personalExpense(ranged, meId) : groupExpense(ranged),
+          income: meId ? personalIncome(ranged, meId, idOpts) : groupIncome(ranged),
+          expense: meId ? personalExpense(ranged, meId, idOpts) : groupExpense(ranged),
         },
       }
     }
@@ -207,7 +253,7 @@ export function MoneyPage() {
       week: { HKD: sum(ws, we, 'HKD'), AUD: sum(ws, we, 'AUD') },
       month: { HKD: sum(ms, me, 'HKD'), AUD: sum(ms, me, 'AUD') },
     }
-  }, [list, meId, defaultCurrency])
+  }, [list, meId, defaultCurrency, idOpts])
 
   const chartData = useMemo(() => {
     const ranged = slice(chartCurrency)
@@ -226,7 +272,7 @@ export function MoneyPage() {
     return `${currency} ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
   }
 
-  function openForm(initial: MoneyType) {
+  function resetFormFields(initial: MoneyType) {
     setType(initial)
     setCategory(initial === 'income' ? 'salary' : 'food')
     setSplitMode('personal')
@@ -237,6 +283,64 @@ export function MoneyPage() {
     setFormCurrency(readLastCurrency(defaultCurrency))
     setMyShareInput('')
     setPartnerShareInput('')
+  }
+
+  function openForm(initial: MoneyType) {
+    setEditingId(null)
+    setEditingCreatedAt(null)
+    resetFormFields(initial)
+    setShowForm(true)
+  }
+
+  function openEdit(entry: MoneyEntry) {
+    setEditingId(entry.id)
+    setEditingCreatedAt(entry.createdAt)
+    setType(entry.type)
+    setCategory(entry.category)
+    setAmount(String(entry.amount))
+    setNote(entry.note || '')
+    setDate(entry.date)
+    setFormCurrency(entryCurrency(entry, defaultCurrency))
+    const mode = effectiveSplitMode(entry)
+    setSplitMode(mode === 'custom' ? 'custom' : mode === 'equal' ? 'equal' : 'personal')
+    const payerIsMe =
+      !entry.paidById ||
+      entry.paidById === meId ||
+      idsEquivalent(entry.paidById, meId, aliasMap)
+    setPaidBy(payerIsMe ? 'me' : 'partner')
+
+    // If entry references a specific partner id, prefer that for the form
+    if (entry.paidById && !payerIsMe) {
+      setPreferredPartnerId(entry.paidById)
+    } else if (entry.participantIds) {
+      const other = entry.participantIds.find(
+        (id) => id && !idsEquivalent(id, meId, aliasMap),
+      )
+      if (other) setPreferredPartnerId(other)
+    }
+
+    if (mode === 'custom' && entry.shares) {
+      const mine =
+        shareAmountFromMap(entry.shares, meId, aliasMap) ??
+        (meId ? entry.shares[meId] : undefined)
+      let theirs: number | undefined
+      if (partnerId) {
+        theirs =
+          shareAmountFromMap(entry.shares, partnerId, aliasMap) ??
+          entry.shares[partnerId]
+      }
+      if (theirs == null) {
+        const otherEntry = Object.entries(entry.shares).find(
+          ([id]) => !idsEquivalent(id, meId, aliasMap),
+        )
+        theirs = otherEntry ? Number(otherEntry[1]) : undefined
+      }
+      setMyShareInput(mine != null ? String(mine) : '')
+      setPartnerShareInput(theirs != null ? String(theirs) : '')
+    } else {
+      setMyShareInput('')
+      setPartnerShareInput('')
+    }
     setShowForm(true)
   }
 
@@ -300,11 +404,16 @@ export function MoneyPage() {
     const payerIsMe = paidBy === 'me'
     const pidPartner = partnerId || null
     if ((splitMode === 'equal' || splitMode === 'custom' || paidBy === 'partner') && !pidPartner) {
-      alert(t('money.needPartnerMember'))
+      alert(
+        partnerResolution.ambiguous
+          ? t('money.pickPartnerHint')
+          : t('money.needPartnerMember'),
+      )
       return
     }
+    // Always write real auth uids of chosen members — never invent "partner"
     const paidById = payerIsMe ? settings.userId : (pidPartner as string)
-    const paidByName = payerIsMe ? meName : partnerLabel
+    const paidByName = payerIsMe ? meName : (partnerMember?.displayName || partnerLabel)
 
     let mode: SplitMode = 'personal'
     if (type === 'expense') {
@@ -318,7 +427,9 @@ export function MoneyPage() {
         ? [settings.userId, pidPartner as string]
         : [paidById]
     const participantNames =
-      mode === 'equal' || mode === 'custom' ? [meName, partnerLabel] : [paidByName]
+      mode === 'equal' || mode === 'custom'
+        ? [meName, partnerMember?.displayName || partnerLabel]
+        : [paidByName]
 
     let shares: Record<string, number> | undefined
     if (mode === 'custom') {
@@ -337,13 +448,13 @@ export function MoneyPage() {
     }
 
     const entry: MoneyEntry = {
-      id: uid(),
+      id: editingId || uid(),
       type,
       amount: Math.round(n * 100) / 100,
       category,
       note: note.trim() || undefined,
       date,
-      createdAt: now,
+      createdAt: editingCreatedAt || now,
       updatedAt: now,
       currency: formCurrency,
       paidById,
@@ -364,21 +475,27 @@ export function MoneyPage() {
     setNote('')
     setMyShareInput('')
     setPartnerShareInput('')
+    setEditingId(null)
+    setEditingCreatedAt(null)
     setShowForm(false)
   }
 
   async function saveSettlement() {
     const n = Number(settleAmount)
     if (!Number.isFinite(n) || n <= 0 || !settings?.userId || !partnerId) {
-      alert(t('money.needPartnerMember'))
+      alert(
+        partnerResolution.ambiguous
+          ? t('money.pickPartnerHint')
+          : t('money.needPartnerMember'),
+      )
       return
     }
     const now = new Date().toISOString()
     const fromIsMe = settleFrom === 'me'
     const fromUserId = fromIsMe ? settings.userId : partnerId
     const toUserId = fromIsMe ? partnerId : settings.userId
-    const fromUserName = fromIsMe ? meName : partnerLabel
-    const toUserName = fromIsMe ? partnerLabel : meName
+    const fromUserName = fromIsMe ? meName : (partnerMember?.displayName || partnerLabel)
+    const toUserName = fromIsMe ? (partnerMember?.displayName || partnerLabel) : meName
     const sDoc: Settlement = {
       id: uid(),
       amount: Math.round(n * 100) / 100,
@@ -564,19 +681,26 @@ export function MoneyPage() {
   function entryMeta(e: MoneyEntry) {
     const mode = effectiveSplitMode(e)
     const cur = entryCurrency(e, defaultCurrency)
-    const payer = e.paidByName || (e.paidById === meId ? meName : partnerLabel)
+    const payerIsMe =
+      e.paidById != null && idsEquivalent(e.paidById, meId, aliasMap)
+    const payer =
+      e.paidByName ||
+      (payerIsMe || (!e.paidById && meId) ? meName : partnerLabel)
     if (e.type === 'income') {
       return t('money.receivedBy', { name: payer })
     }
     if (mode === 'equal') {
-      const myShare = meId ? shareForUser(e, meId) : e.amount / 2
+      const myShare = meId ? shareForUser(e, meId, idOpts) : e.amount / 2
       return `${t('money.sharedEqual')} · ${t('money.paidBy')}: ${payer} · ${t('money.myShare')}: ${fmt(myShare, cur)}`
     }
     if (mode === 'custom') {
-      const map = sharesForEntry(e, meId || 'me', partnerId)
-      const myAmt = meId ? map[meId] ?? 0 : 0
-      const partnerKey = partnerId || 'partner'
-      const partnerAmt = map[partnerKey] ?? Object.entries(map).find(([id]) => id !== meId)?.[1] ?? 0
+      const map = sharesForEntry(e, meId || 'me', partnerId, idOpts)
+      const myAmt = meId
+        ? (shareAmountFromMap(map, meId, aliasMap) ?? map[meId] ?? 0)
+        : 0
+      const partnerAmt = partnerId
+        ? (shareAmountFromMap(map, partnerId, aliasMap) ?? map[partnerId] ?? 0)
+        : Object.entries(map).find(([id]) => !idsEquivalent(id, meId, aliasMap))?.[1] ?? 0
       return `${t('money.sharedCustom')} · ${t('money.paidBy')}: ${payer} · ${t('money.myShare')}: ${fmt(myAmt, cur)} · ${partnerLabel}: ${fmt(partnerAmt, cur)}`
     }
     return `${t('money.personal')} · ${t('money.paidBy')}: ${payer}`
@@ -588,6 +712,33 @@ export function MoneyPage() {
     if (mode === 'equal') return <span className="tag shared">{t('money.sharedEqual')}</span>
     if (mode === 'custom') return <span className="tag shared custom">{t('money.sharedCustom')}</span>
     return <span className="tag personal">{t('money.personal')}</span>
+  }
+
+  function PartnerPicker() {
+    if (!partnerResolution.ambiguous && partnerResolution.candidates.length <= 1) {
+      return null
+    }
+    if (partnerResolution.candidates.length === 0) return null
+    return (
+      <div className="field">
+        <label>{t('money.pickPartner')}</label>
+        <div className="muted" style={{ fontSize: '0.78rem', marginBottom: 4 }}>
+          {t('money.pickPartnerHint')}
+        </div>
+        <div className="chip-row">
+          {partnerResolution.candidates.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={`chip${partnerId === m.id ? ' active' : ''}`}
+              onClick={() => setPreferredPartnerId(m.id)}
+            >
+              {memberLabel(m, { showEmail: true })}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -606,6 +757,9 @@ export function MoneyPage() {
         </div>
         <div className="muted" style={{ fontSize: '0.78rem' }}>
           {t('money.dualCurrencyHint')}
+        </div>
+        <div className="muted" style={{ fontSize: '0.78rem' }}>
+          {t('money.sameEmailHint')}
         </div>
 
         {CURRENCIES.map((c) => (
@@ -639,12 +793,15 @@ export function MoneyPage() {
         <div className="muted" style={{ fontSize: '0.78rem' }}>
           {t('money.settlementHint')}
         </div>
+        <PartnerPicker />
         {CURRENCIES.map((c) => (
           <SettlementBlock key={c} currency={c} />
         ))}
         {!partnerId ? (
           <div className="muted" style={{ fontSize: '0.78rem' }}>
-            {t('money.needPartnerMember')}
+            {partnerResolution.ambiguous
+              ? t('money.pickPartnerHint')
+              : t('money.needPartnerMember')}
           </div>
         ) : null}
 
@@ -653,14 +810,16 @@ export function MoneyPage() {
             <div className="scope-heading">{t('money.settlementHistory')}</div>
             {settleList.map((s) => {
               const cur = entryCurrency(s, defaultCurrency)
+              const fromIsMe = idsEquivalent(s.fromUserId, meId, aliasMap)
+              const toIsMe = idsEquivalent(s.toUserId, meId, aliasMap)
               return (
                 <div key={s.id} className="money-item">
                   <div>
                     <div>
                       <strong>
-                        {s.fromUserName || (s.fromUserId === meId ? meName : partnerLabel)}
+                        {s.fromUserName || (fromIsMe ? meName : partnerLabel)}
                         {' → '}
-                        {s.toUserName || (s.toUserId === meId ? meName : partnerLabel)}
+                        {s.toUserName || (toIsMe ? meName : partnerLabel)}
                       </strong>
                       <span className="tag currency-tag">{cur}</span>
                       <span className="tag shared">{t('money.settlement')}</span>
@@ -692,7 +851,7 @@ export function MoneyPage() {
       {settings?.roomCode ? (
         <div className="card stack">
           <strong>{t('money.groupMembers')}</strong>
-          <RoomMembersList members={memberList} meId={meId} />
+          <RoomMembersList members={memberList} meId={meId} showDuplicateHint />
         </div>
       ) : null}
 
@@ -755,13 +914,22 @@ export function MoneyPage() {
                   <div className="muted" style={{ fontSize: '0.78rem' }}>
                     {entryMeta(e)}
                   </div>
-                  <button
-                    type="button"
-                    className="btn danger small"
-                    onClick={() => void remove(e)}
-                  >
-                    {t('todos.delete')}
-                  </button>
+                  <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      className="btn secondary small"
+                      onClick={() => openEdit(e)}
+                    >
+                      {t('money.edit')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger small"
+                      onClick={() => void remove(e)}
+                    >
+                      {t('todos.delete')}
+                    </button>
+                  </div>
                 </div>
                 <div className={`amount ${e.type}`}>
                   {e.type === 'income' ? '+' : '-'}
@@ -774,9 +942,17 @@ export function MoneyPage() {
       </div>
 
       {showForm ? (
-        <div className="modal-backdrop" onClick={() => setShowForm(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            setShowForm(false)
+            setEditingId(null)
+            setEditingCreatedAt(null)
+          }}
+        >
           <div className="modal stack" onClick={(e) => e.stopPropagation()}>
-            <h2>{t('money.add')}</h2>
+            <h2>{editingId ? t('money.editEntry') : t('money.add')}</h2>
+            <PartnerPicker />
             <div className="chip-row">
               <button
                 type="button"
@@ -869,7 +1045,9 @@ export function MoneyPage() {
               </div>
               {!partnerId ? (
                 <div className="muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
-                  {t('money.needPartnerMember')}
+                  {partnerResolution.ambiguous
+                    ? t('money.pickPartnerHint')
+                    : t('money.needPartnerMember')}
                 </div>
               ) : null}
             </div>
@@ -950,7 +1128,15 @@ export function MoneyPage() {
               <input value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
             <div className="row">
-              <button type="button" className="btn secondary grow" onClick={() => setShowForm(false)}>
+              <button
+                type="button"
+                className="btn secondary grow"
+                onClick={() => {
+                  setShowForm(false)
+                  setEditingId(null)
+                  setEditingCreatedAt(null)
+                }}
+              >
                 {t('todos.cancel')}
               </button>
               <button type="button" className="btn grow" onClick={() => void save()}>
@@ -965,6 +1151,7 @@ export function MoneyPage() {
         <div className="modal-backdrop" onClick={() => setShowSettleForm(false)}>
           <div className="modal stack" onClick={(e) => e.stopPropagation()}>
             <h2>{t('money.recordPaymentTitle')}</h2>
+            <PartnerPicker />
             <div className="field">
               <label>{t('money.entryCurrency')}</label>
               <div className="chip-row">
@@ -994,6 +1181,7 @@ export function MoneyPage() {
                   type="button"
                   className={`chip${settleFrom === 'partner' ? ' active' : ''}`}
                   onClick={() => setSettleFrom('partner')}
+                  disabled={!partnerId}
                 >
                   {t('money.partner')} ({partnerLabel})
                 </button>
@@ -1001,9 +1189,7 @@ export function MoneyPage() {
             </div>
             <div className="muted" style={{ fontSize: '0.85rem' }}>
               {t('money.paymentTo')}:{' '}
-              <strong>
-                {settleFrom === 'me' ? partnerLabel : meName}
-              </strong>
+              <strong>{settleFrom === 'me' ? partnerLabel : meName}</strong>
             </div>
             <div className="field">
               <label>{t('money.amount')}</label>

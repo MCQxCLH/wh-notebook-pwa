@@ -112,7 +112,12 @@
     "noSettlements": "No repayments recorded yet",
     "exportCsv": "Export CSV",
     "exportDone": "CSV downloaded",
-    "recentCategories": "Recent"
+    "recentCategories": "Recent",
+    "edit": "Edit",
+    "editEntry": "Edit entry",
+    "pickPartner": "Choose partner",
+    "pickPartnerHint": "Multiple people in this room — pick who to settle with.",
+    "sameEmailHint": "Use the same email on every device so you stay one person in the room."
   },
   "settings": {
     "title": "Settings",
@@ -179,7 +184,8 @@
     "confirmRemoveMember": "Remove {{name}} from this room?",
     "memberRemoved": "Member removed",
     "exportData": "Export money & settlements (CSV)",
-    "exportHint": "Downloads a CSV of money entries and settlements from this device."
+    "exportHint": "Downloads a CSV of money entries and settlements from this device.",
+    "duplicateNamesHint": "Duplicate display names in this room: {{names}}. Remove ghost members below, and use the same email on every device."
   },
   "common": {
     "loading": "Loading…",

@@ -547,6 +547,7 @@ export function SettingsPage() {
               members={members ?? []}
               meId={settings.userId}
               allowRemove
+              showDuplicateHint
               onRemoved={() => setMsg(t('settings.memberRemoved'))}
             />
             <button type="button" className="btn danger" onClick={() => void leaveRoom()}>
