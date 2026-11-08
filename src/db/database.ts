@@ -8,6 +8,7 @@ import type {
   Settlement,
   AppSettings,
   RoomMember,
+  BuyItem,
 } from './types'
 import { uid } from '../utils/id'
 
@@ -34,6 +35,7 @@ class WhNotebookDB extends Dexie {
   moneyEntries!: EntityTable<MoneyEntry, 'id'>
   settlements!: EntityTable<Settlement, 'id'>
   roomMembers!: EntityTable<RoomMember, 'id'>
+  buyItems!: EntityTable<BuyItem, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
   constructor() {
@@ -63,6 +65,17 @@ class WhNotebookDB extends Dexie {
       moneyEntries: 'id, date, type, updatedAt',
       settlements: 'id, date, currency, updatedAt',
       roomMembers: 'id, updatedAt',
+      settings: 'id',
+    })
+    this.version(4).stores({
+      todos: 'id, order, completed, updatedAt',
+      reminders: 'id, at, fired, todoId, updatedAt',
+      journalEntries: 'id, date, updatedAt',
+      journalComments: 'id, entryId, createdAt, updatedAt',
+      moneyEntries: 'id, date, type, updatedAt',
+      settlements: 'id, date, currency, updatedAt',
+      roomMembers: 'id, updatedAt',
+      buyItems: 'id, category, bought, updatedAt',
       settings: 'id',
     })
   }

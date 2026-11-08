@@ -97,6 +97,23 @@ export interface Settlement {
   deleted?: boolean
 }
 
+
+export type BuyCategory = 'groceries' | 'nonGroceries'
+
+/** Shared shopping / to-buy list item (synced via rooms/{code}/buyItems). */
+export interface BuyItem {
+  id: string
+  name: string
+  category: BuyCategory
+  /** Optional budget amount (display only; currency label from settings default). */
+  budget?: number
+  remarks?: string
+  bought: boolean
+  createdAt: string
+  updatedAt: string
+  deleted?: boolean
+}
+
 export interface RoomMember {
   id: string
   displayName: string
@@ -132,4 +149,5 @@ export type SyncCollection =
   | 'moneyEntries'
   | 'settlements'
   | 'roomMembers'
+  | 'buyItems'
   | 'settings'

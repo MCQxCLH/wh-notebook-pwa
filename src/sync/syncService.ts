@@ -15,6 +15,7 @@ import type {
   Settlement,
   AppSettings,
   RoomMember,
+  BuyItem,
 } from '../db/types'
 import {
   ensureSignedInUser,
@@ -131,6 +132,20 @@ export async function pushRoomMember(m: RoomMember) {
   const s = await ensureSettings()
   if (!s.roomCode || !isFirebaseConfigured()) return
   await pushDoc(s.roomCode, 'members', m.id, { ...m } as unknown as Record<string, unknown>)
+}
+
+export async function pushBuyItem(item: BuyItem) {
+  const s = await ensureSettings()
+  if (!s.roomCode || !isFirebaseConfigured()) return
+  try {
+    await pushDoc(s.roomCode, 'buyItems', item.id, {
+      ...item,
+    } as unknown as Record<string, unknown>)
+  } catch (err) {
+    console.error('[sync] pushBuyItem failed', err)
+    setStatus('error')
+    throw err
+  }
 }
 
 /** Soft-delete a room member and push tombstone (or leave for self). */
@@ -438,6 +453,16 @@ export async function startSync(): Promise<void> {
         },
       },
       {
+        name: 'buyItems',
+        apply: async (data) => {
+          await mergeCollection(
+            (id) => db.buyItems.get(id),
+            (item) => db.buyItems.put(item),
+            data as unknown as BuyItem,
+          )
+        },
+      },
+      {
         name: 'members',
         apply: async (data) => {
           const member = data as unknown as RoomMember
@@ -534,7 +559,7 @@ export async function pushAllLocal(): Promise<void> {
   if (!s.roomCode || !isFirebaseConfigured()) return
   const user = await ensureSignedInUser()
   if (!user) return
-  const [todos, reminders, entries, comments, money, settlements, members] = await Promise.all([
+  const [todos, reminders, entries, comments, money, settlements, members, buyItems] = await Promise.all([
     db.todos.toArray(),
     db.reminders.toArray(),
     db.journalEntries.toArray(),
@@ -542,6 +567,7 @@ export async function pushAllLocal(): Promise<void> {
     db.moneyEntries.toArray(),
     db.settlements.toArray(),
     db.roomMembers.toArray(),
+    db.buyItems.toArray(),
   ])
   await Promise.all([
     ...todos.map((t) => pushTodo(t)),
@@ -550,6 +576,7 @@ export async function pushAllLocal(): Promise<void> {
     ...comments.map((c) => pushJournalComment(c)),
     ...money.map((m) => pushMoneyEntry(m)),
     ...settlements.map((x) => pushSettlement(x)),
+    ...buyItems.map((b) => pushBuyItem(b)),
     ...members.filter((m) => !m.deleted).map((m) => pushRoomMember(m)),
     pushSettingsPartial(s),
   ])

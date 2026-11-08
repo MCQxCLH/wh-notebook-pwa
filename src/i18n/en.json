@@ -4,7 +4,8 @@
     "todos": "To-do",
     "journal": "Journal",
     "money": "Money",
-    "settings": "Settings"
+    "settings": "Settings",
+    "buy": "To-buy"
   },
   "todos": {
     "title": "To-dos",
@@ -209,5 +210,28 @@
     "step2Hint": "Shown to your travel partner in the room.",
     "step3": "3. Create or join a room",
     "step3Hint": "Share the room code with your partner for real-time sync."
+  },
+  "buy": {
+    "title": "To-buy",
+    "add": "Add item",
+    "name": "Name",
+    "namePlaceholder": "What to buy?",
+    "budget": "Budget",
+    "remarks": "Remarks",
+    "remarksPlaceholder": "Optional notes…",
+    "optional": "optional",
+    "category": "Category",
+    "groceries": "Groceries",
+    "nonGroceries": "Non-groceries",
+    "filterAll": "All",
+    "empty": "No items yet",
+    "emptyCategory": "Nothing in this category",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel",
+    "hint": "Two categories: groceries and non-groceries. Name is required; budget and remarks are optional. Check when bought.",
+    "bought": "Bought",
+    "toBuy": "To buy"
   }
 }

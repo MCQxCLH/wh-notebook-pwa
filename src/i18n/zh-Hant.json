@@ -4,7 +4,8 @@
     "todos": "待辦",
     "journal": "日誌",
     "money": "收支",
-    "settings": "設定"
+    "settings": "設定",
+    "buy": "購物"
   },
   "todos": {
     "title": "待辦事項",
@@ -209,5 +210,28 @@
     "step2Hint": "旅伴在房間裡會看到這個名稱。",
     "step3": "3. 建立或加入房間",
     "step3Hint": "把房間代碼分享給旅伴即可即時同步。"
+  },
+  "buy": {
+    "title": "購物清單",
+    "add": "新增項目",
+    "name": "名稱",
+    "namePlaceholder": "要買什麼？",
+    "budget": "預算",
+    "remarks": "備註",
+    "remarksPlaceholder": "可選備註…",
+    "optional": "選填",
+    "category": "分類",
+    "groceries": "雜貨／食品",
+    "nonGroceries": "非雜貨／其他",
+    "filterAll": "全部",
+    "empty": "尚無購物項目",
+    "emptyCategory": "此分類暫無項目",
+    "edit": "編輯",
+    "delete": "刪除",
+    "save": "儲存",
+    "cancel": "取消",
+    "hint": "分雜貨與非雜貨兩類；名稱必填，預算與備註選填。勾選表示已買。",
+    "bought": "已買",
+    "toBuy": "待買"
   }
 }

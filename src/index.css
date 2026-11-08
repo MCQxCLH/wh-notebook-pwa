@@ -191,7 +191,7 @@ button {
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   z-index: 30;
 }
 .nav-item {
@@ -201,7 +201,7 @@ button {
   justify-content: center;
   gap: 2px;
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 600;
 }
 .nav-item.active { color: var(--primary); }
@@ -251,7 +251,7 @@ button {
 .check.on {
   background: var(--primary);
   color: white;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
 }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -297,7 +297,7 @@ button {
   margin-top: 8px;
 }
 .comment .meta {
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   color: var(--muted);
   margin-bottom: 2px;
 }

@@ -6,6 +6,7 @@ import { Onboarding } from './components/Onboarding'
 import type { TabId } from './components/BottomNav'
 import { TodosPage } from './pages/TodosPage'
 import { JournalPage } from './pages/JournalPage'
+import { BuyPage } from './pages/BuyPage'
 import { MoneyPage } from './pages/MoneyPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ensureSettings } from './db/database'
@@ -83,6 +84,7 @@ export default function App() {
       >
         {tab === 'todos' ? <TodosPage /> : null}
         {tab === 'journal' ? <JournalPage /> : null}
+        {tab === 'buy' ? <BuyPage /> : null}
         {tab === 'money' ? <MoneyPage /> : null}
         {tab === 'settings' ? <SettingsPage /> : null}
       </Layout>

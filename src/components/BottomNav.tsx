@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-export type TabId = 'todos' | 'journal' | 'money' | 'settings'
+export type TabId = 'todos' | 'journal' | 'buy' | 'money' | 'settings'
 
 interface Props {
   tab: TabId
@@ -10,13 +10,14 @@ interface Props {
 const ICONS: Record<TabId, string> = {
   todos: '✓',
   journal: '✎',
+  buy: '🛒',
   money: '¥',
   settings: '⚙',
 }
 
 export function BottomNav({ tab, onChange }: Props) {
   const { t } = useTranslation()
-  const items: TabId[] = ['todos', 'journal', 'money', 'settings']
+  const items: TabId[] = ['todos', 'journal', 'buy', 'money', 'settings']
 
   return (
     <nav className="bottom-nav" aria-label="Primary">
